@@ -1,8 +1,8 @@
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from ingest import load_document, DATA_PATH
-from chunker import chunk_text
+from backend.app.rag.ingest import load_document, DATA_PATH
+from backend.app.rag.chunker import chunk_text
 
 model = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
