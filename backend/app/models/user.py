@@ -27,3 +27,8 @@ class User(Base):
         unique=True,
         nullable=False
     )
+
+    password = Column(
+        String,
+        nullable=False
+    )

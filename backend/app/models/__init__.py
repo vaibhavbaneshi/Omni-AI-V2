@@ -1,3 +1,7 @@
+from app.models.conversation_summary import (
+    ConversationSummary
+)
+
 from app.db.database import (
     engine,
     Base

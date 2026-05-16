@@ -26,6 +26,27 @@ from app.services.conversation_service import (
     get_chat_history
 )
 
+from app.services.memory_summary_service import (
+    generate_summary,
+    get_summary
+)
+
+from app.services.agent_service import (
+    retrieval_agent
+)
+
+from app.services.tool_agent import (
+    tool_calling_agent
+)
+
+from app.services.summary_service import (
+    summarize_conversation
+)
+
+from app.core.security import (
+    get_current_user
+)
+
 router = APIRouter()
 
 @router.post("/chat")
@@ -33,6 +54,7 @@ router = APIRouter()
 def chat(
     query: str,
     session_id: int,
+    current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
 
@@ -58,28 +80,100 @@ def chat(
         content=result["response"]
     )
 
+    generate_summary(
+        session_id=session_id
+    )
+
     return result
 
 @router.post("/chat-stream")
 
 def chat_stream(
     query: str,
-    session_id: int
+    session_id: int,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
 
-    context = retrieve_context(query)
+    # -----------------------------------
+    # SAVE USER MESSAGE
+    # -----------------------------------
 
-    history = get_chat_history( 
-        session_id=session_id
-    )   
-
-    generator = stream_response(
-        query=query,
-        context=context,
-        history=history
+    save_message(
+        db=db,
+        session_id=session_id,
+        role="user",
+        content=query
     )
 
+    # -----------------------------------
+    # AGENT
+    # -----------------------------------
+
+    agent_result = tool_calling_agent(
+        query=query
+    )
+
+    print(
+        "TOOL USED:",
+        agent_result["tool"]
+    )
+
+    context = agent_result["context"]
+
+    # -----------------------------------
+    # HISTORY
+    # -----------------------------------
+
+    history = get_chat_history(
+        session_id=session_id
+    )
+
+    print(history)
+
+    # -----------------------------------
+    # SUMMARY
+    # -----------------------------------
+
+    summary = summarize_conversation(
+        history
+    )
+
+    # -----------------------------------
+    # STREAM WRAPPER
+    # -----------------------------------
+
+    complete_response = ""
+
+    def generate():
+
+        nonlocal complete_response
+
+        generator = stream_response(
+            query=query,
+            context=context,
+            history=history,
+            summary=summary
+        )
+
+        for token in generator:
+
+            complete_response += token
+
+            yield token
+
+        # -----------------------------------
+        # SAVE ASSISTANT RESPONSE
+        # -----------------------------------
+
+        save_message(
+            db=db,
+            session_id=session_id,
+            role="assistant",
+            content=complete_response
+        )
+
     return StreamingResponse(
-        generator,
+        generate(),
         media_type="text/plain"
     )

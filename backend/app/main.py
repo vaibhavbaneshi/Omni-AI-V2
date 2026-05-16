@@ -9,6 +9,18 @@ from app.api.upload_routes import (
     router as upload_router
 )
 
+from app.api.session_routes import (
+    router as session_router
+)
+
+from app.api.auth_routes import (
+    router as auth_router
+)
+
+from app.api.session_routes import (
+    router as session_router
+)
+
 app = FastAPI(
     title=settings.APP_NAME,
     version="1.0.0"
@@ -32,3 +44,6 @@ def health():
 app.include_router(user_router)
 app.include_router(chat_router)
 app.include_router(upload_router)
+app.include_router(session_router)
+app.include_router(auth_router)
+app.include_router(session_router)

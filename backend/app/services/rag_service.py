@@ -126,7 +126,8 @@ def chat_with_rag(query: str):
 def stream_response(
     query,
     context,
-    history=""
+    history="",
+    summary=""
 ):
 
     prompt = f"""
@@ -141,6 +142,10 @@ to answer accurately.
 -----------------------------------
 CONVERSATION HISTORY:
 {history}
+
+-----------------------------------
+CONVERSATION SUMMARY:
+{summary}
 
 -----------------------------------
 RETRIEVED CONTEXT:
