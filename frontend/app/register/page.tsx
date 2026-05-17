@@ -89,6 +89,12 @@ export default function RegisterPage() {
             </p>
           </div>
 
+          {error && (
+            <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+              {error}
+            </p>
+          )}
+
           <SocialAuthButtons
             nextPath={redirect}
             disabled={isLoading}
@@ -106,12 +112,6 @@ export default function RegisterPage() {
               </span>
             </div>
           </div>
-
-          {error && (
-            <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
-              {error}
-            </p>
-          )}
 
           {/* Register Form */}
           <form onSubmit={handleSubmit} className="space-y-4">

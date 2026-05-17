@@ -85,6 +85,12 @@ export default function LoginPage() {
             </p>
           </div>
 
+          {error && (
+            <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+              {error}
+            </p>
+          )}
+
           <SocialAuthButtons
             nextPath={redirect}
             disabled={isLoading}
@@ -102,12 +108,6 @@ export default function LoginPage() {
               </span>
             </div>
           </div>
-
-          {error && (
-            <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
-              {error}
-            </p>
-          )}
 
           {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-4">

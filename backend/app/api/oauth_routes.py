@@ -1,10 +1,10 @@
-import os
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.core.oauth_config import get_oauth_settings, oauth_providers_status
 from app.db.session import get_db
 from app.services.auth_service import create_access_token
 from app.services.oauth_service import (
@@ -21,12 +21,6 @@ from app.services.oauth_service import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
-GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "").strip()
-GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "").strip()
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
-
 
 def _sanitize_next_path(next_path: str | None) -> str:
     if not next_path or not next_path.startswith("/"):
@@ -36,13 +30,13 @@ def _sanitize_next_path(next_path: str | None) -> str:
     return next_path
 
 
-def _frontend_callback_url() -> str:
-    return f"{FRONTEND_URL}/auth/callback"
-
-
 def _redirect_to_frontend_error(message: str, next_path: str = "/login") -> RedirectResponse:
+    settings = get_oauth_settings()
     params = urlencode({"error": message, "next": next_path})
-    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?{params}")
+    return RedirectResponse(
+        f"{settings['frontend_url']}/auth/callback?{params}",
+        status_code=302,
+    )
 
 
 def _redirect_to_frontend_success(
@@ -53,6 +47,7 @@ def _redirect_to_frontend_success(
     username: str,
     next_path: str,
 ) -> RedirectResponse:
+    settings = get_oauth_settings()
     params = urlencode(
         {
             "token": token,
@@ -62,22 +57,24 @@ def _redirect_to_frontend_success(
             "next": next_path,
         }
     )
-    return RedirectResponse(f"{_frontend_callback_url()}?{params}")
+    return RedirectResponse(
+        f"{settings['frontend_url']}/auth/callback?{params}",
+        status_code=302,
+    )
 
 
 @router.get("/providers")
 def oauth_providers():
-    return {
-        "github": bool(GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET),
-        "google": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
-    }
+    return oauth_providers_status()
 
 
 @router.get("/github")
 def github_login(
     next: str = Query("/dashboard", alias="next"),
 ):
-    if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
+    settings = get_oauth_settings()
+
+    if not settings["github_client_id"] or not settings["github_client_secret"]:
         raise HTTPException(
             status_code=503,
             detail="GitHub sign-in is not configured on the server.",
@@ -85,14 +82,14 @@ def github_login(
 
     next_path = _sanitize_next_path(next)
     state = encode_oauth_state("github", next_path)
-    redirect_uri = f"{os.getenv('API_PUBLIC_URL', 'http://localhost:8000').rstrip('/')}/auth/github/callback"
+    redirect_uri = f"{settings['api_public_url']}/auth/github/callback"
 
     authorize_url = build_github_authorize_url(
-        client_id=GITHUB_CLIENT_ID,
+        client_id=settings["github_client_id"],
         redirect_uri=redirect_uri,
         state=state,
     )
-    return RedirectResponse(authorize_url)
+    return RedirectResponse(authorize_url, status_code=302)
 
 
 @router.get("/github/callback")
@@ -102,6 +99,7 @@ def github_callback(
     error: str | None = None,
     db: Session = Depends(get_db),
 ):
+    settings = get_oauth_settings()
     next_path = "/dashboard"
 
     if error:
@@ -113,11 +111,11 @@ def github_callback(
     try:
         state_payload = decode_oauth_state(state)
         next_path = _sanitize_next_path(state_payload.get("next"))
-        redirect_uri = f"{os.getenv('API_PUBLIC_URL', 'http://localhost:8000').rstrip('/')}/auth/github/callback"
+        redirect_uri = f"{settings['api_public_url']}/auth/github/callback"
 
         access_token = exchange_github_code(
-            client_id=GITHUB_CLIENT_ID,
-            client_secret=GITHUB_CLIENT_SECRET,
+            client_id=settings["github_client_id"],
+            client_secret=settings["github_client_secret"],
             code=code,
             redirect_uri=redirect_uri,
         )
@@ -140,7 +138,9 @@ def github_callback(
 def google_login(
     next: str = Query("/dashboard", alias="next"),
 ):
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+    settings = get_oauth_settings()
+
+    if not settings["google_client_id"] or not settings["google_client_secret"]:
         raise HTTPException(
             status_code=503,
             detail="Google sign-in is not configured on the server.",
@@ -148,14 +148,14 @@ def google_login(
 
     next_path = _sanitize_next_path(next)
     state = encode_oauth_state("google", next_path)
-    redirect_uri = f"{os.getenv('API_PUBLIC_URL', 'http://localhost:8000').rstrip('/')}/auth/google/callback"
+    redirect_uri = f"{settings['api_public_url']}/auth/google/callback"
 
     authorize_url = build_google_authorize_url(
-        client_id=GOOGLE_CLIENT_ID,
+        client_id=settings["google_client_id"],
         redirect_uri=redirect_uri,
         state=state,
     )
-    return RedirectResponse(authorize_url)
+    return RedirectResponse(authorize_url, status_code=302)
 
 
 @router.get("/google/callback")
@@ -165,6 +165,7 @@ def google_callback(
     error: str | None = None,
     db: Session = Depends(get_db),
 ):
+    settings = get_oauth_settings()
     next_path = "/dashboard"
 
     if error:
@@ -176,11 +177,11 @@ def google_callback(
     try:
         state_payload = decode_oauth_state(state)
         next_path = _sanitize_next_path(state_payload.get("next"))
-        redirect_uri = f"{os.getenv('API_PUBLIC_URL', 'http://localhost:8000').rstrip('/')}/auth/google/callback"
+        redirect_uri = f"{settings['api_public_url']}/auth/google/callback"
 
         access_token = exchange_google_code(
-            client_id=GOOGLE_CLIENT_ID,
-            client_secret=GOOGLE_CLIENT_SECRET,
+            client_id=settings["google_client_id"],
+            client_secret=settings["google_client_secret"],
             code=code,
             redirect_uri=redirect_uri,
         )

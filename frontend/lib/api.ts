@@ -129,7 +129,24 @@ export type OAuthProviders = {
 };
 
 export async function getOAuthProviders() {
-  return apiRequest<OAuthProviders>("/auth/providers");
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+
+  try {
+    return await apiRequest<OAuthProviders>("/auth/providers", {
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(
+        `Cannot reach the API at ${API_BASE}. Start the backend and verify NEXT_PUBLIC_API_URL.`,
+        0
+      );
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export function getOAuthStartUrl(provider: "github" | "google", nextPath = "/dashboard") {
