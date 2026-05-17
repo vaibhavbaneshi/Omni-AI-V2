@@ -13,11 +13,14 @@ import {
   Globe,
   Layers,
   Lock,
-  Terminal
+  Terminal,
+  LayoutDashboard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { getInitials, useSession } from "@/lib/auth";
 
 // Premium motion easing
 const premiumEasing = [0.16, 1, 0.3, 1] as const;
@@ -36,6 +39,9 @@ const staggerContainer = {
 };
 
 export default function LandingPage() {
+  const { session, ready, authenticated } = useSession();
+  const initials = getInitials(session?.name);
+
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden selection:bg-primary/30">
       {/* Abstract Background Effects */}
@@ -67,16 +73,45 @@ export default function LandingPage() {
               </Link>
             </div>
 
-            <div className="flex items-center gap-4">
-              <Link href="/login" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-                Sign In
-              </Link>
-              <Button size="sm" className="shadow-[0_0_20px_rgba(var(--primary),0.2)]" asChild>
-                <Link href="/register">
-                  Get Started
-                </Link>
-              </Button>
-            </div>
+            <motion.div
+              className="flex items-center gap-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: ready ? 1 : 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              {ready && authenticated ? (
+                <>
+                  <Link
+                    href="/dashboard"
+                    className="hidden text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline-flex sm:items-center sm:gap-1.5"
+                  >
+                    <LayoutDashboard className="size-4" />
+                    Dashboard
+                  </Link>
+                  <Button size="sm" className="shadow-[0_0_20px_rgba(var(--primary),0.2)]" asChild>
+                    <Link href="/chat">Workspace</Link>
+                  </Button>
+                  <Avatar className="size-8 ring-1 ring-white/10">
+                    <AvatarFallback className="bg-primary/15 text-xs text-primary">
+                      {initials}
+                    </AvatarFallback>
+                  </Avatar>
+                </>
+              ) : ready ? (
+                <>
+                  <Link href="/login" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                    Sign In
+                  </Link>
+                  <Button size="sm" className="shadow-[0_0_20px_rgba(var(--primary),0.2)]" asChild>
+                    <Link href="/register">
+                      Get Started
+                    </Link>
+                  </Button>
+                </>
+              ) : (
+                <motion.div className="h-8 w-28 rounded-md bg-white/5" aria-hidden />
+              )}
+            </motion.div>
           </div>
         </div>
       </nav>
@@ -93,7 +128,9 @@ export default function LandingPage() {
             <motion.div variants={fadeInUp}>
               <Badge variant="outline" className="mb-8 border-primary/30 bg-primary/5 text-primary backdrop-blur-sm px-4 py-1.5 rounded-full text-xs font-medium">
                 <Sparkles className="size-3.5 mr-2" />
-                Omni AI 2.0 is now available
+                {ready && authenticated
+                  ? `Welcome back, ${session?.name?.split(" ")[0] || "there"}`
+                  : "Omni AI 2.0 is now available"}
               </Badge>
             </motion.div>
             
@@ -101,16 +138,26 @@ export default function LandingPage() {
               variants={fadeInUp}
               className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-balance leading-tight"
             >
-              Your Intelligent <br />
-              <span className="text-gradient">AI Operating System</span>
+              {ready && authenticated ? (
+                <>
+                  Welcome back, {session?.name?.split(" ")[0] || "there"}. <br />
+                  <span className="text-gradient">Your workspace is ready</span>
+                </>
+              ) : (
+                <>
+                  Your Intelligent <br />
+                  <span className="text-gradient">AI Operating System</span>
+                </>
+              )}
             </motion.h1>
             
             <motion.p 
               variants={fadeInUp}
               className="mt-8 text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto text-pretty font-medium"
             >
-              The most powerful AI workspace for developers and power users. 
-              Chat with elite models, analyze complex documents, generate production code, and build faster.
+              {ready && authenticated
+                ? "Jump back into chat, upload documents, and continue building with your connected AI workspace."
+                : "The most powerful AI workspace for developers and power users. Chat with elite models, analyze complex documents, generate production code, and build faster."}
             </motion.p>
             
             <motion.div 
@@ -118,14 +165,14 @@ export default function LandingPage() {
               className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4"
             >
               <Button size="lg" className="w-full sm:w-auto glow-primary font-semibold text-primary-foreground h-12 px-8" asChild>
-                <Link href="/register">
-                  Start Building Free
+                <Link href={ready && authenticated ? "/dashboard" : "/register"}>
+                  {ready && authenticated ? "Open Dashboard" : "Start Building Free"}
                   <ArrowRight className="ml-2 size-4" />
                 </Link>
               </Button>
               <Button variant="outline" size="lg" className="w-full sm:w-auto h-12 px-8 border-white/10 hover:bg-white/5" asChild>
-                <Link href="/chat">
-                  Try Live Demo
+                <Link href={ready && authenticated ? "/chat" : "/login"}>
+                  {ready && authenticated ? "Go to Workspace" : "Try Live Demo"}
                 </Link>
               </Button>
             </motion.div>

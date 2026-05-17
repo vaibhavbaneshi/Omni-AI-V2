@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 export type OmniSession = {
   name: string;
   email: string;
+  username: string;
   token: string;
   createdAt: string;
 };
@@ -17,7 +18,21 @@ export function getSession(): OmniSession | null {
 
   try {
     const raw = window.localStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as OmniSession) : null;
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<OmniSession>;
+    if (!parsed.token || !parsed.email) {
+      window.localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+
+    return {
+      name: parsed.name || parsed.email.split("@")[0] || "User",
+      email: parsed.email,
+      username: parsed.username || parsed.email,
+      token: parsed.token,
+      createdAt: parsed.createdAt || new Date().toISOString(),
+    };
   } catch {
     window.localStorage.removeItem(SESSION_KEY);
     return null;
@@ -28,23 +43,33 @@ export function isAuthenticated() {
   return Boolean(getSession()?.token);
 }
 
-export function createSession({
-  name = "John Doe",
-  email,
-}: {
-  name?: string;
-  email: string;
-}) {
-  const session: OmniSession = {
-    name,
-    email,
-    token: `demo-${crypto.randomUUID()}`,
-    createdAt: new Date().toISOString(),
-  };
-
+export function persistSession(session: OmniSession) {
+  if (typeof window === "undefined") return session;
   window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   window.dispatchEvent(new Event("omni-auth-changed"));
   return session;
+}
+
+export function createSession({
+  name,
+  email,
+  username,
+  token,
+}: {
+  name?: string;
+  email: string;
+  username?: string;
+  token: string;
+}) {
+  const session: OmniSession = {
+    name: name?.trim() || email.split("@")[0] || "User",
+    email,
+    username: username || email,
+    token,
+    createdAt: new Date().toISOString(),
+  };
+
+  return persistSession(session);
 }
 
 export function clearSession() {
@@ -54,7 +79,7 @@ export function clearSession() {
 }
 
 export function getInitials(name?: string) {
-  return (name || "John Doe")
+  return (name || "User")
     .split(" ")
     .map((part) => part[0])
     .join("")
@@ -101,10 +126,13 @@ export function useRequireAuth() {
 export function useAuthRedirect(defaultPath = "/dashboard") {
   const router = useRouter();
   const state = useSession();
-  const redirect =
-    typeof window === "undefined"
-      ? defaultPath
-      : new URLSearchParams(window.location.search).get("redirect") || defaultPath;
+  const [redirect, setRedirect] = useState(defaultPath);
+
+  useEffect(() => {
+    const next =
+      new URLSearchParams(window.location.search).get("redirect") || defaultPath;
+    setRedirect(next);
+  }, [defaultPath]);
 
   useEffect(() => {
     if (state.ready && state.authenticated) {

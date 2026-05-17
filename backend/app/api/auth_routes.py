@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 from fastapi import Depends
+from fastapi import HTTPException
+from fastapi import status
 
 from sqlalchemy.orm import Session
 
@@ -64,17 +66,19 @@ def login(
     )
 
     if not user:
-        return {
-            "error": "Invalid username"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+        )
 
     if not verify_password(
         form_data.password,
         user.password
     ):
-        return {
-            "error": "Invalid password"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+        )
 
     access_token = create_access_token(
         data={

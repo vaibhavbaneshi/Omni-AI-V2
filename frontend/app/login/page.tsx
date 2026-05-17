@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { createSession, useAuthRedirect } from "@/lib/auth";
+import { ApiError, loginWithCredentials } from "@/lib/api";
 import { fadeUpVariant } from "@/lib/motion";
 
 export default function LoginPage() {
@@ -18,14 +19,30 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    createSession({ email });
-    router.replace(redirect);
+    setError(null);
+
+    try {
+      const auth = await loginWithCredentials(email.trim(), password);
+      createSession({
+        email: email.trim(),
+        username: email.trim(),
+        token: auth.access_token,
+      });
+      router.replace(redirect);
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : "Unable to sign in. Check your credentials and try again.";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -82,6 +99,12 @@ export default function LoginPage() {
               </span>
             </div>
           </div>
+
+          {error && (
+            <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+              {error}
+            </p>
+          )}
 
           {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-4">

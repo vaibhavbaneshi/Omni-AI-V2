@@ -46,6 +46,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sidebarTransition, fadeUpVariant } from "@/lib/motion";
 import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
+import { ApiError, uploadDocument } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -203,7 +204,10 @@ export default function ChatPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "up" | "down">>({});
-  const [attachmentVisible, setAttachmentVisible] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [expandedFolders, setExpandedFolders] = useState<string[]>(["Work"]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -438,6 +442,49 @@ Would you like me to elaborate on any of these points?`;
   const handleLogout = () => {
     clearSession();
     window.location.assign("/login");
+  };
+
+  const handleAttachmentClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setAttachedFile(null);
+      setUploadStatus("error");
+      setUploadMessage("Only PDF documents are supported.");
+      return;
+    }
+
+    setAttachedFile(file);
+    setUploadStatus("uploading");
+    setUploadMessage(null);
+
+    try {
+      const result = await uploadDocument(file, session?.token);
+      setUploadStatus("success");
+      setUploadMessage(
+        `${result.message} (${result.chunks_created} chunks indexed)`
+      );
+    } catch (error) {
+      setUploadStatus("error");
+      setUploadMessage(
+        error instanceof ApiError
+          ? error.message
+          : "Upload failed. Check that the backend is running."
+      );
+    }
+  };
+
+  const handleRemoveAttachment = () => {
+    setAttachedFile(null);
+    setUploadStatus("idle");
+    setUploadMessage(null);
   };
 
   if (!ready || !authenticated) {
@@ -1051,22 +1098,47 @@ Would you like me to elaborate on any of these points?`;
         {/* Input Area */}
         <div className="shrink-0 p-3 pt-2 sm:p-4 sm:pt-2">
           <div className="max-w-[720px] mx-auto">
-            {/* Mock Upload State */}
-            {attachmentVisible && (
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#050505] border border-white/5 shadow-inner group cursor-pointer hover:bg-white/[0.02] transition-colors">
-                <FileIcon className="size-3.5 text-blue-400" />
-                <span className="text-[11px] font-medium text-foreground/80 truncate max-w-[120px]">architecture_v2.pdf</span>
-                <button
-                  type="button"
-                  className="size-4 rounded-full bg-white/5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10 ml-1"
-                  onClick={() => setAttachmentVisible(false)}
-                  aria-label="Remove attachment"
-                >
-                  <X className="size-2.5 text-muted-foreground hover:text-foreground" />
-                </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,application/pdf"
+              className="hidden"
+              onChange={handleFileSelected}
+            />
+
+            {(attachedFile || uploadMessage) && (
+              <div className="mb-2 space-y-1 px-1">
+                {attachedFile && (
+                  <motion.div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#050505] border border-white/5 shadow-inner group">
+                    {uploadStatus === "uploading" ? (
+                      <Loader2 className="size-3.5 animate-spin text-primary" />
+                    ) : (
+                      <FileIcon className="size-3.5 text-blue-400" />
+                    )}
+                    <span className="text-[11px] font-medium text-foreground/80 truncate max-w-[180px]">
+                      {attachedFile.name}
+                    </span>
+                    <button
+                      type="button"
+                      className="size-4 rounded-full bg-white/5 flex items-center justify-center opacity-70 hover:opacity-100 hover:bg-white/10 ml-1"
+                      onClick={handleRemoveAttachment}
+                      aria-label="Remove attachment"
+                      disabled={uploadStatus === "uploading"}
+                    >
+                      <X className="size-2.5 text-muted-foreground hover:text-foreground" />
+                    </button>
+                  </motion.div>
+                )}
+                {uploadMessage && (
+                  <p
+                    className={`text-[11px] ${
+                      uploadStatus === "error" ? "text-destructive" : "text-emerald-300"
+                    }`}
+                  >
+                    {uploadMessage}
+                  </p>
+                )}
               </div>
-            </div>
             )}
 
             <div className="relative">
@@ -1087,7 +1159,8 @@ Would you like me to elaborate on any of these points?`;
                         variant="ghost" 
                         size="icon" 
                         className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
-                        onClick={() => setAttachmentVisible(true)}
+                        onClick={handleAttachmentClick}
+                        disabled={uploadStatus === "uploading"}
                       >
                         <Paperclip className="size-4" />
                       </Button>
