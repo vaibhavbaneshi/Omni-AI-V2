@@ -7,11 +7,9 @@ import {
   Brain, 
   FileText, 
   Code2, 
-  MessageSquare,
   ArrowRight,
   Check,
   Star,
-  ChevronRight,
   Globe,
   Layers,
   Lock,
@@ -22,7 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 // Premium motion easing
-const premiumEasing = [0.16, 1, 0.3, 1];
+const premiumEasing = [0.16, 1, 0.3, 1] as const;
 
 const fadeInUp = {
   initial: { opacity: 0, y: 30 },
@@ -192,7 +190,7 @@ export default function LandingPage() {
                       <Sparkles className="size-4 text-primary" />
                     </div>
                     <div className="flex-1 pt-1 space-y-4">
-                      <p className="text-sm text-muted-foreground leading-relaxed">I'll create a simulation of a qubit and apply a Hadamard gate using numpy. The Hadamard gate creates an equal superposition state.</p>
+                      <p className="text-sm text-muted-foreground leading-relaxed">I&apos;ll create a simulation of a qubit and apply a Hadamard gate using numpy. The Hadamard gate creates an equal superposition state.</p>
                       <div className="bg-[#050505] rounded-xl p-4 border border-white/5 shadow-inner font-mono text-xs text-muted-foreground overflow-hidden">
                         <div className="flex items-center justify-between mb-3 border-b border-white/5 pb-2">
                           <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">python</span>
@@ -517,11 +515,11 @@ export default function LandingPage() {
               <span className="text-base font-semibold tracking-tight">Omni AI</span>
             </div>
             <div className="flex flex-wrap justify-center items-center gap-6 text-sm font-medium text-muted-foreground">
-              <Link href="#" className="hover:text-foreground transition-colors">Features</Link>
-              <Link href="#" className="hover:text-foreground transition-colors">Pricing</Link>
-              <Link href="#" className="hover:text-foreground transition-colors">Documentation</Link>
-              <Link href="#" className="hover:text-foreground transition-colors">Security</Link>
-              <Link href="#" className="hover:text-foreground transition-colors">Terms</Link>
+              <Link href="#features" className="hover:text-foreground transition-colors">Features</Link>
+              <Link href="#pricing" className="hover:text-foreground transition-colors">Pricing</Link>
+              <Link href="/chat" className="hover:text-foreground transition-colors">Demo</Link>
+              <Link href="/privacy" className="hover:text-foreground transition-colors">Security</Link>
+              <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
             </div>
             <div className="text-sm font-medium text-muted-foreground">
               © {new Date().getFullYear()} Omni AI. All rights reserved.

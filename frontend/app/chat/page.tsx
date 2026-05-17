@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type CSSProperties } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -9,7 +9,6 @@ import {
   Settings,
   ChevronDown,
   ChevronRight,
-  MessageSquare,
   FileText,
   Code2,
   Image as ImageIcon,
@@ -30,7 +29,6 @@ import {
   ThumbsUp,
   ThumbsDown,
   Share,
-  Bookmark,
   ArrowUp,
   Mic,
   Hash,
@@ -46,11 +44,11 @@ import {
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { sidebarTransition, fadeUpVariant, premiumEasing, pulseAnimation } from "@/lib/motion";
+import { sidebarTransition, fadeUpVariant } from "@/lib/motion";
+import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -72,6 +70,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+
+const syntaxTheme = vscDarkPlus as Record<string, CSSProperties>;
 
 type Message = {
   id: string;
@@ -188,18 +188,40 @@ Would you like me to show you specific examples for your component?`,
 ];
 
 export default function ChatPage() {
+  const { session, ready, authenticated } = useRequireAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [chats, setChats] = useState<Chat[]>(initialChats);
-  const [activeChat, setActiveChat] = useState<Chat | null>(initialChats[0]);
+  const [activeChat, setActiveChat] = useState<Chat | null>(() => {
+    if (typeof window === "undefined") return initialChats[0];
+    const chatId = new URLSearchParams(window.location.search).get("id");
+    return initialChats.find((chat) => chat.id === chatId) || initialChats[0];
+  });
   const [selectedModel, setSelectedModel] = useState("gpt-4");
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "up" | "down">>({});
+  const [attachmentVisible, setAttachmentVisible] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<string[]>(["Work"]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const syncSidebar = () => setSidebarOpen(window.innerWidth >= 1024);
+    syncSidebar();
+    window.addEventListener("resize", syncSidebar);
+    return () => window.removeEventListener("resize", syncSidebar);
+  }, []);
+
+  useEffect(() => {
+    if (!activeChat) return;
+    const nextUrl = `/chat?id=${encodeURIComponent(activeChat.id)}`;
+    if (window.location.pathname + window.location.search !== nextUrl) {
+      window.history.replaceState(null, "", nextUrl);
+    }
+  }, [activeChat]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -228,17 +250,18 @@ export default function ChatPage() {
     return fullContent;
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || isStreaming) return;
+  const handleSend = async (overrideInput?: string) => {
+    const messageText = (overrideInput ?? input).trim();
+    if (!messageText || isStreaming) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input.trim(),
+      content: messageText,
       timestamp: new Date(),
     };
 
-    const currentInput = input.trim();
+    const currentInput = messageText;
     setInput("");
 
     if (activeChat) {
@@ -318,10 +341,34 @@ Would you like me to elaborate on any of these points?`;
     setActiveChat(newChat);
   };
 
+  const handleRenameChat = (chatId: string) => {
+    const chat = chats.find((item) => item.id === chatId);
+    const nextTitle = window.prompt("Rename chat", chat?.title || "New Chat")?.trim();
+    if (!nextTitle) return;
+
+    const update = (item: Chat) => (item.id === chatId ? { ...item, title: nextTitle } : item);
+    setChats((prev) => prev.map(update));
+    setActiveChat((prev) => (prev?.id === chatId ? update(prev) : prev));
+  };
+
+  const handleTogglePin = (chatId: string) => {
+    const update = (item: Chat) => (item.id === chatId ? { ...item, pinned: !item.pinned } : item);
+    setChats((prev) => prev.map(update));
+    setActiveChat((prev) => (prev?.id === chatId ? update(prev) : prev));
+  };
+
+  const handleMoveToWork = (chatId: string) => {
+    const update = (item: Chat) =>
+      item.id === chatId ? { ...item, folder: item.folder === "Work" ? undefined : "Work" } : item;
+    setChats((prev) => prev.map(update));
+    setActiveChat((prev) => (prev?.id === chatId ? update(prev) : prev));
+  };
+
   const handleDeleteChat = (chatId: string) => {
-    setChats(chats.filter((c) => c.id !== chatId));
+    const remainingChats = chats.filter((c) => c.id !== chatId);
+    setChats(remainingChats);
     if (activeChat?.id === chatId) {
-      setActiveChat(chats[0] || null);
+      setActiveChat(remainingChats[0] || null);
     }
   };
 
@@ -329,6 +376,22 @@ Would you like me to elaborate on any of these points?`;
     navigator.clipboard.writeText(content);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleShare = async () => {
+    const url = `${window.location.origin}/chat${activeChat ? `?id=${activeChat.id}` : ""}`;
+    if (navigator.share) {
+      await navigator.share({ title: activeChat?.title || "Omni AI Chat", url });
+      return;
+    }
+
+    handleCopy(url, "share-link");
+  };
+
+  const handleRegenerate = async () => {
+    const lastUserMessage = [...(activeChat?.messages || [])].reverse().find((message) => message.role === "user");
+    if (!lastUserMessage || isStreaming) return;
+    await handleSend(lastUserMessage.content);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -369,19 +432,39 @@ Would you like me to elaborate on any of these points?`;
   };
 
   const currentModel = models.find((m) => m.id === selectedModel);
+  const initials = getInitials(session?.name);
+  const displayName = session?.name || "John Doe";
+
+  const handleLogout = () => {
+    clearSession();
+    window.location.assign("/login");
+  };
+
+  if (!ready || !authenticated) {
+    return <div className="min-h-dvh bg-background" />;
+  }
 
   return (
-    <div className="h-screen flex bg-background overflow-hidden">
+    <div className="flex h-dvh min-h-0 bg-background overflow-hidden">
       {/* Linear/Cursor-style Sidebar */}
       <AnimatePresence mode="wait">
         {sidebarOpen && (
-          <motion.aside
-            initial={sidebarTransition.initial}
-            animate={sidebarTransition.animate}
-            exit={sidebarTransition.exit}
-            transition={sidebarTransition.transition}
-            className="h-full border-r border-white/5 bg-[#050505] flex flex-col"
-          >
+          <>
+            <motion.button
+              aria-label="Close sidebar"
+              className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSidebarOpen(false)}
+            />
+            <motion.aside
+              initial={sidebarTransition.initial}
+              animate={sidebarTransition.animate}
+              exit={sidebarTransition.exit}
+              transition={sidebarTransition.transition}
+              className="fixed inset-y-0 left-0 z-40 flex h-dvh min-h-0 w-[min(82vw,280px)] flex-col border-r border-white/5 bg-[#050505] lg:relative lg:z-auto lg:w-[260px] lg:shrink-0"
+            >
             {/* Sidebar Header */}
             <div className="h-14 flex items-center justify-between px-4 border-b border-white/5">
               <Link href="/" className="flex items-center gap-2.5">
@@ -437,7 +520,7 @@ Would you like me to elaborate on any of these points?`;
             </div>
 
             {/* Chat List */}
-            <ScrollArea className="flex-1 px-2">
+            <ScrollArea className="min-h-0 flex-1 px-2">
               <div className="py-1">
                 {/* Pinned Section */}
                 {pinnedChats.length > 0 && (
@@ -456,6 +539,9 @@ Would you like me to elaborate on any of these points?`;
                           active={activeChat?.id === chat.id}
                           onClick={() => setActiveChat(chat)}
                           onDelete={() => handleDeleteChat(chat.id)}
+                          onRename={() => handleRenameChat(chat.id)}
+                          onTogglePin={() => handleTogglePin(chat.id)}
+                          onMoveToWork={() => handleMoveToWork(chat.id)}
                           formatTime={formatTime}
                         />
                       ))}
@@ -494,6 +580,9 @@ Would you like me to elaborate on any of these points?`;
                               active={activeChat?.id === chat.id}
                               onClick={() => setActiveChat(chat)}
                               onDelete={() => handleDeleteChat(chat.id)}
+                              onRename={() => handleRenameChat(chat.id)}
+                              onTogglePin={() => handleTogglePin(chat.id)}
+                              onMoveToWork={() => handleMoveToWork(chat.id)}
                               formatTime={formatTime}
                             />
                           ))}
@@ -519,6 +608,9 @@ Would you like me to elaborate on any of these points?`;
                           active={activeChat?.id === chat.id}
                           onClick={() => setActiveChat(chat)}
                           onDelete={() => handleDeleteChat(chat.id)}
+                          onRename={() => handleRenameChat(chat.id)}
+                          onTogglePin={() => handleTogglePin(chat.id)}
+                          onMoveToWork={() => handleMoveToWork(chat.id)}
                           formatTime={formatTime}
                         />
                       ))}
@@ -535,11 +627,11 @@ Would you like me to elaborate on any of these points?`;
                   <button className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors group">
                     <Avatar className="size-6 ring-1 ring-white/10">
                       <AvatarFallback className="bg-gradient-to-br from-primary/20 to-chart-2/20 text-[10px] font-medium text-foreground">
-                        JD
+                        {initials}
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1 text-left min-w-0">
-                      <p className="text-[12px] font-medium truncate leading-tight group-hover:text-foreground transition-colors text-muted-foreground">John Doe</p>
+                      <p className="text-[12px] font-medium truncate leading-tight group-hover:text-foreground transition-colors text-muted-foreground">{displayName}</p>
                       <p className="text-[10px] text-muted-foreground/50 truncate">Pro Plan</p>
                     </div>
                     <ChevronDown className="size-3.5 text-muted-foreground/40 shrink-0 group-hover:text-muted-foreground/80 transition-colors" />
@@ -561,24 +653,23 @@ Would you like me to elaborate on any of these points?`;
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link href="/login">
+                  <DropdownMenuItem onClick={handleLogout}>
                       <LogOut data-icon="inline-start" />
                       Sign Out
-                    </Link>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-          </motion.aside>
+            </motion.aside>
+          </>
         )}
       </AnimatePresence>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-background to-[oklch(0.09_0.005_285)]">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-gradient-to-b from-background to-[oklch(0.09_0.005_285)]">
         {/* Top Bar */}
-        <header className="h-14 border-b border-border/40 flex items-center justify-between px-4 bg-background/80 backdrop-blur-md sticky top-0 z-10">
-          <div className="flex items-center gap-3">
+        <header className="h-14 shrink-0 border-b border-border/40 flex items-center justify-between gap-2 px-3 sm:px-4 bg-background/80 backdrop-blur-md sticky top-0 z-10">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             {!sidebarOpen && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -595,8 +686,8 @@ Would you like me to elaborate on any of these points?`;
               </Tooltip>
             )}
 
-            <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger className="w-auto h-8 gap-2 text-[13px] font-medium border-0 bg-transparent hover:bg-muted/50 px-2">
+            <Select value={selectedModel} onValueChange={(value) => value && setSelectedModel(value)}>
+              <SelectTrigger className="h-8 max-w-[46vw] gap-2 overflow-hidden border-0 bg-transparent px-2 text-[13px] font-medium hover:bg-muted/50 sm:max-w-none">
                 <div className="flex items-center gap-2">
                   {currentModel && <currentModel.icon className="size-3.5 text-primary" />}
                   <SelectValue />
@@ -622,17 +713,17 @@ Would you like me to elaborate on any of these points?`;
             </Select>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <Badge 
               variant="outline" 
-              className="text-[10px] h-6 px-2.5 gap-1.5 bg-success/5 text-success border-success/20 font-normal"
+              className="hidden h-6 gap-1.5 bg-success/5 px-2.5 text-[10px] font-normal text-success border-success/20 sm:inline-flex"
             >
               <span className="size-1.5 rounded-full bg-success animate-pulse" />
               Pro Search
             </Badge>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-foreground">
+                <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-foreground" onClick={handleShare}>
                   <Share className="size-4" />
                 </Button>
               </TooltipTrigger>
@@ -652,8 +743,8 @@ Would you like me to elaborate on any of these points?`;
         </header>
 
         {/* Messages Area */}
-        <ScrollArea className="flex-1">
-          <div className="max-w-[720px] mx-auto px-6 py-10">
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="mx-auto max-w-[720px] px-4 py-8 sm:px-6 sm:py-10">
             {activeChat?.messages.length === 0 && !isStreaming ? (
               <motion.div
                 variants={fadeUpVariant}
@@ -676,7 +767,7 @@ Would you like me to elaborate on any of these points?`;
                 <p className="text-[15px] text-muted-foreground mb-12 max-w-md mx-auto leading-relaxed text-balance">
                   Ask anything. I can help with code, writing, analysis, math, and much more.
                 </p>
-                <div className="grid grid-cols-2 gap-3 max-w-lg mx-auto">
+                <div className="mx-auto grid max-w-lg grid-cols-1 gap-3 sm:grid-cols-2">
                   {[
                     { icon: Code2, text: "Help me write code", color: "from-blue-500/10 to-cyan-500/10" },
                     { icon: FileText, text: "Summarize content", color: "from-amber-500/10 to-orange-500/10" },
@@ -710,7 +801,7 @@ Would you like me to elaborate on any of these points?`;
                   >
                     {message.role === "user" ? (
                       <div className="flex justify-end">
-                        <div className="max-w-[80%]">
+                        <div className="max-w-[92%] sm:max-w-[80%]">
                           <div className="bg-primary/10 text-foreground border border-primary/20 rounded-2xl rounded-br-sm px-5 py-3.5 shadow-sm">
                             <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
                               {message.content}
@@ -776,9 +867,9 @@ Would you like me to elaborate on any of these points?`;
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             components={{
-                              code({ node, inline, className, children, ...props }: any) {
+                              code({ className, children }) {
                                 const match = /language-(\w+)/.exec(className || "");
-                                return !inline && match ? (
+                                return match ? (
                                   <div className="relative mt-4 mb-6 rounded-xl overflow-hidden border border-white/5 shadow-inner bg-[#050505]">
                                     <div className="flex items-center justify-between px-4 py-2 bg-white/[0.02] border-b border-white/5 text-[11px] text-muted-foreground/60 font-medium">
                                       <span>{match[1]}</span>
@@ -791,7 +882,7 @@ Would you like me to elaborate on any of these points?`;
                                       </button>
                                     </div>
                                     <SyntaxHighlighter
-                                      style={vscDarkPlus as any}
+                                      style={syntaxTheme}
                                       language={match[1]}
                                       PreTag="div"
                                       customStyle={{
@@ -800,13 +891,12 @@ Would you like me to elaborate on any of these points?`;
                                         background: "transparent",
                                         fontSize: "13px",
                                       }}
-                                      {...props}
                                     >
                                       {String(children).replace(/\n$/, "")}
                                     </SyntaxHighlighter>
                                   </div>
                                 ) : (
-                                  <code className={className} {...props}>
+                                  <code className={className}>
                                     {children}
                                   </code>
                                 );
@@ -834,16 +924,26 @@ Would you like me to elaborate on any of these points?`;
                           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="size-7 text-muted-foreground/60 hover:text-foreground">
-                                  <ThumbsUp className="size-3.5" />
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-7 text-muted-foreground/60 hover:text-foreground"
+                                  onClick={() => setFeedbackByMessage((prev) => ({ ...prev, [message.id]: "up" }))}
+                                >
+                                  <ThumbsUp className={`size-3.5 ${feedbackByMessage[message.id] === "up" ? "text-success" : ""}`} />
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>Good</TooltipContent>
                             </Tooltip>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="size-7 text-muted-foreground/60 hover:text-foreground">
-                                  <ThumbsDown className="size-3.5" />
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-7 text-muted-foreground/60 hover:text-foreground"
+                                  onClick={() => setFeedbackByMessage((prev) => ({ ...prev, [message.id]: "down" }))}
+                                >
+                                  <ThumbsDown className={`size-3.5 ${feedbackByMessage[message.id] === "down" ? "text-warning" : ""}`} />
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>Bad</TooltipContent>
@@ -867,7 +967,7 @@ Would you like me to elaborate on any of these points?`;
                             </Tooltip>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="size-7 text-muted-foreground/60 hover:text-foreground">
+                                <Button variant="ghost" size="icon" className="size-7 text-muted-foreground/60 hover:text-foreground" onClick={handleRegenerate}>
                                   <RefreshCw className="size-3.5" />
                                 </Button>
                               </TooltipTrigger>
@@ -893,15 +993,15 @@ Would you like me to elaborate on any of these points?`;
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           components={{
-                            code({ node, inline, className, children, ...props }: any) {
+                            code({ className, children }) {
                               const match = /language-(\w+)/.exec(className || "");
-                              return !inline && match ? (
+                              return match ? (
                                 <div className="relative mt-4 mb-6 rounded-xl overflow-hidden border border-white/5 shadow-inner bg-[#050505]">
                                   <div className="flex items-center justify-between px-4 py-2 bg-white/[0.02] border-b border-white/5 text-[11px] text-muted-foreground/60 font-medium">
                                     <span>{match[1]}</span>
                                   </div>
                                   <SyntaxHighlighter
-                                    style={vscDarkPlus as any}
+                                    style={syntaxTheme}
                                     language={match[1]}
                                     PreTag="div"
                                     customStyle={{
@@ -910,13 +1010,12 @@ Would you like me to elaborate on any of these points?`;
                                       background: "transparent",
                                       fontSize: "13px",
                                     }}
-                                    {...props}
                                   >
                                     {String(children).replace(/\n$/, "")}
                                   </SyntaxHighlighter>
                                 </div>
                               ) : (
-                                <code className={className} {...props}>
+                                <code className={className}>
                                   {children}
                                 </code>
                               );
@@ -950,25 +1049,32 @@ Would you like me to elaborate on any of these points?`;
         </ScrollArea>
 
         {/* Input Area */}
-        <div className="p-4 pt-2">
+        <div className="shrink-0 p-3 pt-2 sm:p-4 sm:pt-2">
           <div className="max-w-[720px] mx-auto">
             {/* Mock Upload State */}
+            {attachmentVisible && (
             <div className="flex items-center gap-2 mb-2 px-1">
               <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#050505] border border-white/5 shadow-inner group cursor-pointer hover:bg-white/[0.02] transition-colors">
                 <FileIcon className="size-3.5 text-blue-400" />
                 <span className="text-[11px] font-medium text-foreground/80 truncate max-w-[120px]">architecture_v2.pdf</span>
-                <button className="size-4 rounded-full bg-white/5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10 ml-1">
+                <button
+                  type="button"
+                  className="size-4 rounded-full bg-white/5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10 ml-1"
+                  onClick={() => setAttachmentVisible(false)}
+                  aria-label="Remove attachment"
+                >
                   <X className="size-2.5 text-muted-foreground hover:text-foreground" />
                 </button>
               </div>
             </div>
+            )}
 
             <div className="relative">
               <div className="bg-white/[0.02] backdrop-blur-xl border border-white/5 rounded-2xl focus-within:border-primary/30 focus-within:ring-1 focus-within:ring-primary/10 focus-within:bg-white/[0.04] transition-all shadow-premium">
                 <textarea
                   ref={inputRef}
                   placeholder="Message Omni AI..."
-                  className="w-full min-h-[56px] max-h-[200px] resize-none bg-transparent px-5 py-4 pr-32 text-[15px] placeholder:text-muted-foreground/40 focus:outline-none leading-relaxed"
+                  className="w-full min-h-[56px] max-h-[32dvh] resize-none bg-transparent px-4 py-4 pr-28 text-[15px] placeholder:text-muted-foreground/40 focus:outline-none leading-relaxed sm:px-5 sm:pr-32"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -981,6 +1087,7 @@ Would you like me to elaborate on any of these points?`;
                         variant="ghost" 
                         size="icon" 
                         className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
+                        onClick={() => setAttachmentVisible(true)}
                       >
                         <Paperclip className="size-4" />
                       </Button>
@@ -993,6 +1100,7 @@ Would you like me to elaborate on any of these points?`;
                         variant="ghost" 
                         size="icon" 
                         className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
+                        onClick={() => setInput((prev) => prev || "Transcribe this voice note")}
                       >
                         <Mic className="size-4" />
                       </Button>
@@ -1002,7 +1110,7 @@ Would you like me to elaborate on any of these points?`;
                   <Button
                     size="icon"
                     className={`size-8 rounded-lg transition-all duration-300 ${input.trim() && !isStreaming ? "glow-primary bg-primary text-primary-foreground hover:bg-primary/90" : "bg-white/5 text-muted-foreground/50"}`}
-                    onClick={handleSend}
+                    onClick={() => handleSend()}
                     disabled={!input.trim() || isStreaming}
                   >
                     <ArrowUp className="size-4" />
@@ -1025,12 +1133,18 @@ function ChatItem({
   active,
   onClick,
   onDelete,
+  onRename,
+  onTogglePin,
+  onMoveToWork,
   formatTime,
 }: {
   chat: Chat;
   active: boolean;
   onClick: () => void;
   onDelete: () => void;
+  onRename: () => void;
+  onTogglePin: () => void;
+  onMoveToWork: () => void;
   formatTime: (date: Date) => string;
 }) {
   return (
@@ -1060,17 +1174,17 @@ function ChatItem({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-36">
           <DropdownMenuGroup>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={onRename}>
               <Edit2 data-icon="inline-start" />
               Rename
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={onTogglePin}>
               <Star data-icon="inline-start" />
-              Pin
+              {chat.pinned ? "Unpin" : "Pin"}
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={onMoveToWork}>
               <Folder data-icon="inline-start" />
-              Move to...
+              {chat.folder === "Work" ? "Remove from Work" : "Move to Work"}
             </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />

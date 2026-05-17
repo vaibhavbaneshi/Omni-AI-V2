@@ -1,4 +1,4 @@
-export const premiumEasing = [0.16, 1, 0.3, 1];
+export const premiumEasing = [0.16, 1, 0.3, 1] as const;
 
 export const pageTransition = {
   initial: { opacity: 0, y: 10 },

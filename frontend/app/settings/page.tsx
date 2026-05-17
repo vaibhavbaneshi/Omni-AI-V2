@@ -1,47 +1,113 @@
 "use client";
 
 import { useState } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
-  Sparkles,
-  User,
-  Bell,
-  Shield,
-  CreditCard,
-  Key,
-  Palette,
-  Globe,
-  Zap,
-  ChevronLeft,
-  Save,
-  Check,
   Brain,
+  Check,
+  ChevronLeft,
   Copy,
+  CreditCard,
+  Download,
   Eye,
   EyeOff,
+  Key,
+  Lock,
+  Palette,
   RefreshCw,
+  Save,
+  Shield,
+  SlidersHorizontal,
+  Sparkles,
+  User,
+  Zap,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  SelectGroup,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { getInitials, useRequireAuth } from "@/lib/auth";
+
+const fadeIn = {
+  initial: { opacity: 0, y: 16 },
+  animate: { opacity: 1, y: 0 },
+};
+
+const settingCards = [
+  { label: "Model routing", value: "GPT-4 primary", icon: Brain },
+  { label: "Workspace mode", value: "Pro control", icon: SlidersHorizontal },
+  { label: "Security posture", value: "Protected", icon: Shield },
+];
+
+function Panel({
+  title,
+  description,
+  children,
+  className = "",
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card className={`rounded-lg border-white/10 bg-card/65 shadow-premium ${className}`}>
+      <CardHeader className="px-4 sm:px-5">
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5 px-4 pb-5 sm:px-5">{children}</CardContent>
+    </Card>
+  );
+}
+
+function ToggleRow({
+  title,
+  description,
+  defaultChecked,
+}: {
+  title: string;
+  description: string;
+  defaultChecked?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.03] p-3 ring-1 ring-white/5">
+      <div className="space-y-0.5">
+        <Label className="text-sm">{title}</Label>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+      <Switch defaultChecked={defaultChecked} />
+    </div>
+  );
+}
+
+function MetricTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-white/[0.035] p-4 ring-1 ring-white/5">
+      <p className="text-2xl font-semibold">{value}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{label}</p>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
+  const { session, ready, authenticated } = useRequireAuth();
   const [isSaving, setIsSaving] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -58,186 +124,170 @@ export default function SettingsPage() {
     setTimeout(() => setCopiedKey(false), 2000);
   };
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" asChild>
-                <Link href="/chat">
-                  <ChevronLeft className="size-4" />
-                </Link>
-              </Button>
-              <div className="flex items-center gap-2">
-                <div className="size-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                  <Sparkles className="size-5 text-primary" />
-                </div>
-                <span className="text-xl font-semibold">Settings</span>
-              </div>
-            </div>
+  if (!ready || !authenticated) {
+    return <div className="min-h-screen bg-background" />;
+  }
 
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? (
-                <>
-                  <span className="size-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin mr-2" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save data-icon="inline-start" />
-                  Save Changes
-                </>
-              )}
-            </Button>
+  const nameParts = (session?.name || "John Doe").split(" ");
+  const firstName = nameParts[0] || "John";
+  const lastName = nameParts.slice(1).join(" ") || "Doe";
+  const email = session?.email || "john@example.com";
+  const initials = getInitials(session?.name);
+
+  return (
+    <div className="min-h-screen overflow-x-hidden bg-background">
+      <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:48px_48px] opacity-20" />
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-background/80 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link href="/chat" aria-label="Back to chat" className={buttonVariants({ variant: "ghost", size: "icon" })}>
+              <ChevronLeft className="size-4" />
+            </Link>
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/25">
+                <Sparkles className="size-5 text-primary" />
+              </div>
+              <span className="truncate text-lg font-semibold sm:text-xl">Workspace Settings</span>
+            </div>
           </div>
+
+          <Button onClick={handleSave} disabled={isSaving} className="h-9">
+            {isSaving ? (
+              <>
+                <span className="mr-2 size-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
+                Saving
+              </>
+            ) : (
+              <>
+                <Save data-icon="inline-start" />
+                Save
+              </>
+            )}
+          </Button>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Tabs defaultValue="profile" className="space-y-8">
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:w-auto lg:inline-flex">
-            <TabsTrigger value="profile" className="gap-2">
+      <main className="relative z-10 mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <motion.section
+          {...fadeIn}
+          className="grid gap-4 rounded-lg border border-white/10 bg-card/70 p-4 shadow-premium backdrop-blur-xl sm:p-6 lg:grid-cols-[1fr_auto]"
+        >
+          <div className="max-w-3xl space-y-3">
+            <Badge className="bg-primary/15 text-primary hover:bg-primary/20">System configuration</Badge>
+            <h1 className="text-3xl font-semibold leading-tight sm:text-4xl">
+              Tune the behavior, access, and economics of your AI workspace.
+            </h1>
+            <p className="text-sm leading-6 text-muted-foreground sm:text-base">
+              Keep profile, model defaults, API access, and billing in one precise command surface.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3 lg:w-[420px] lg:grid-cols-1">
+            {settingCards.map((item) => (
+              <div key={item.label} className="flex items-center gap-3 rounded-lg bg-white/[0.035] p-3 ring-1 ring-white/5">
+                <div className="flex size-9 items-center justify-center rounded-lg bg-background/70">
+                  <item.icon className="size-4 text-primary" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">{item.label}</p>
+                  <p className="text-sm font-medium">{item.value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.section>
+
+        <Tabs defaultValue="profile" className="gap-5">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-lg border border-white/10 bg-card/70 p-1 shadow-premium sm:grid-cols-4 lg:w-fit">
+            <TabsTrigger value="profile" className="h-10 gap-2 rounded-lg px-3">
               <User className="size-4" />
-              <span className="hidden sm:inline">Profile</span>
+              <span>Profile</span>
             </TabsTrigger>
-            <TabsTrigger value="preferences" className="gap-2">
+            <TabsTrigger value="preferences" className="h-10 gap-2 rounded-lg px-3">
               <Palette className="size-4" />
-              <span className="hidden sm:inline">Preferences</span>
+              <span>AI Controls</span>
             </TabsTrigger>
-            <TabsTrigger value="api" className="gap-2">
+            <TabsTrigger value="api" className="h-10 gap-2 rounded-lg px-3">
               <Key className="size-4" />
-              <span className="hidden sm:inline">API</span>
+              <span>API</span>
             </TabsTrigger>
-            <TabsTrigger value="billing" className="gap-2">
+            <TabsTrigger value="billing" className="h-10 gap-2 rounded-lg px-3">
               <CreditCard className="size-4" />
-              <span className="hidden sm:inline">Billing</span>
+              <span>Billing</span>
             </TabsTrigger>
           </TabsList>
 
-          {/* Profile Tab */}
           <TabsContent value="profile">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-6"
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Profile Information</CardTitle>
-                  <CardDescription>
-                    Update your account details and public profile
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="flex items-center gap-6">
-                    <Avatar className="size-20">
-                      <AvatarFallback className="bg-primary/20 text-primary text-2xl">
-                        JD
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="space-y-2">
-                      <Button variant="outline" size="sm">
-                        Change Avatar
-                      </Button>
-                      <p className="text-xs text-muted-foreground">
-                        JPG, PNG or GIF. Max 2MB.
-                      </p>
-                    </div>
+            <motion.div {...fadeIn} className="grid gap-5 lg:grid-cols-[1.25fr_0.75fr]">
+              <Panel title="Identity" description="Account details and workspace presence">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+                  <Avatar className="size-20 ring-1 ring-white/10">
+                    <AvatarFallback className="bg-primary/15 text-2xl text-primary">{initials}</AvatarFallback>
+                  </Avatar>
+                  <div className="space-y-2">
+                    <Button variant="outline" size="sm" className="border-white/10 bg-white/[0.03] hover:bg-white/[0.07]">
+                      Change Avatar
+                    </Button>
+                    <p className="text-xs text-muted-foreground">JPG, PNG or GIF. Max 2MB.</p>
                   </div>
+                </div>
 
-                  <Separator />
+                <Separator />
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="firstName">First Name</Label>
-                      <Input id="firstName" defaultValue="John" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="lastName">Last Name</Label>
-                      <Input id="lastName" defaultValue="Doe" />
-                    </div>
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="email">Email</Label>
-                      <Input id="email" type="email" defaultValue="john@example.com" />
-                    </div>
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="bio">Bio</Label>
-                      <Textarea
-                        id="bio"
-                        placeholder="Tell us about yourself..."
-                        className="resize-none"
-                        rows={3}
-                      />
-                    </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="firstName">First Name</Label>
+                    <Input id="firstName" defaultValue={firstName} />
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="space-y-2">
+                    <Label htmlFor="lastName">Last Name</Label>
+                    <Input id="lastName" defaultValue={lastName} />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input id="email" type="email" defaultValue={email} />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="bio">Operator Notes</Label>
+                    <Textarea id="bio" placeholder="Add context your assistants should know..." className="min-h-24 resize-none" />
+                  </div>
+                </div>
+              </Panel>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Security</CardTitle>
-                  <CardDescription>
-                    Manage your password and security settings
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
+              <Panel title="Security" description="Protection and signed-in devices">
+                <ToggleRow title="Two-Factor Authentication" description="Require a second factor for sensitive changes" />
+                <div className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.03] p-3 ring-1 ring-white/5">
+                  <div className="flex items-center gap-3">
+                    <Lock className="size-4 text-primary" />
                     <div>
                       <p className="font-medium">Password</p>
-                      <p className="text-sm text-muted-foreground">
-                        Last changed 30 days ago
-                      </p>
+                      <p className="text-sm text-muted-foreground">Last changed 30 days ago</p>
                     </div>
-                    <Button variant="outline">Change Password</Button>
                   </div>
-                  <Separator />
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Two-Factor Authentication</p>
-                      <p className="text-sm text-muted-foreground">
-                        Add an extra layer of security
-                      </p>
-                    </div>
-                    <Switch />
+                  <Button variant="outline" size="sm" className="border-white/10 bg-white/[0.03] hover:bg-white/[0.07]">
+                    Change
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.03] p-3 ring-1 ring-white/5">
+                  <div>
+                    <p className="font-medium">Active Sessions</p>
+                    <p className="text-sm text-muted-foreground">3 devices currently signed in</p>
                   </div>
-                  <Separator />
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Active Sessions</p>
-                      <p className="text-sm text-muted-foreground">
-                        3 devices currently signed in
-                      </p>
-                    </div>
-                    <Button variant="outline">Manage</Button>
-                  </div>
-                </CardContent>
-              </Card>
+                  <Button variant="outline" size="sm" className="border-white/10 bg-white/[0.03] hover:bg-white/[0.07]">
+                    Manage
+                  </Button>
+                </div>
+              </Panel>
             </motion.div>
           </TabsContent>
 
-          {/* Preferences Tab */}
           <TabsContent value="preferences">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-6"
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>AI Preferences</CardTitle>
-                  <CardDescription>
-                    Customize your AI assistant behavior
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
+            <motion.div {...fadeIn} className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+              <Panel title="AI Behavior" description="Defaults for routing, tone, and reasoning">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Default Model</Label>
                     <Select defaultValue="gpt-4">
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
                           <SelectItem value="gpt-4">GPT-4 (Recommended)</SelectItem>
@@ -252,9 +302,7 @@ export default function SettingsPage() {
                   <div className="space-y-2">
                     <Label>Response Style</Label>
                     <Select defaultValue="balanced">
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
                           <SelectItem value="concise">Concise</SelectItem>
@@ -264,456 +312,221 @@ export default function SettingsPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="systemPrompt">Custom System Prompt</Label>
-                    <Textarea
-                      id="systemPrompt"
-                      placeholder="Add custom instructions for the AI..."
-                      className="resize-none"
-                      rows={4}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      This prompt will be included in all your conversations
-                    </p>
-                  </div>
+                <div className="space-y-2">
+                  <Label htmlFor="systemPrompt">Custom System Prompt</Label>
+                  <Textarea
+                    id="systemPrompt"
+                    placeholder="Add custom instructions for the AI..."
+                    className="min-h-32 resize-none"
+                  />
+                  <p className="text-xs text-muted-foreground">Included in new conversations by default.</p>
+                </div>
 
-                  <Separator />
+                <div className="grid gap-3">
+                  <ToggleRow title="Web Search" description="Enable real-time web context in responses" defaultChecked />
+                  <ToggleRow title="Code Execution" description="Allow AI to run controlled code snippets" />
+                  <ToggleRow title="Streaming Responses" description="Show responses as they are generated" defaultChecked />
+                </div>
+              </Panel>
 
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label>Web Search</Label>
-                        <p className="text-sm text-muted-foreground">
-                          Enable real-time web search in responses
-                        </p>
-                      </div>
-                      <Switch defaultChecked />
+              <div className="grid gap-5">
+                <Panel title="Appearance" description="Workspace density and display preferences">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Theme</Label>
+                      <Select defaultValue="dark">
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="light">Light</SelectItem>
+                            <SelectItem value="dark">Dark</SelectItem>
+                            <SelectItem value="system">System</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label>Code Execution</Label>
-                        <p className="text-sm text-muted-foreground">
-                          Allow AI to run code snippets
-                        </p>
-                      </div>
-                      <Switch />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label>Streaming Responses</Label>
-                        <p className="text-sm text-muted-foreground">
-                          Show responses as they&apos;re generated
-                        </p>
-                      </div>
-                      <Switch defaultChecked />
+                    <div className="space-y-2">
+                      <Label>Font Size</Label>
+                      <Select defaultValue="medium">
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="small">Small</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="large">Large</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                  <ToggleRow title="Compact Mode" description="Reduce spacing in repeated chat surfaces" />
+                </Panel>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Appearance</CardTitle>
-                  <CardDescription>
-                    Customize how Omni AI looks
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Theme</Label>
-                    <Select defaultValue="dark">
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem value="light">Light</SelectItem>
-                          <SelectItem value="dark">Dark</SelectItem>
-                          <SelectItem value="system">System</SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Font Size</Label>
-                    <Select defaultValue="medium">
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem value="small">Small</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="large">Large</SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Compact Mode</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Reduce spacing in chat interface
-                      </p>
-                    </div>
-                    <Switch />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Notifications</CardTitle>
-                  <CardDescription>
-                    Configure how you receive updates
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Email Notifications</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Receive updates via email
-                      </p>
-                    </div>
-                    <Switch defaultChecked />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Product Updates</Label>
-                      <p className="text-sm text-muted-foreground">
-                        News about new features and improvements
-                      </p>
-                    </div>
-                    <Switch defaultChecked />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Usage Alerts</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Notify when approaching usage limits
-                      </p>
-                    </div>
-                    <Switch defaultChecked />
-                  </div>
-                </CardContent>
-              </Card>
+                <Panel title="Notifications" description="Operational alerts and product updates">
+                  <ToggleRow title="Email Notifications" description="Receive account and workflow updates" defaultChecked />
+                  <ToggleRow title="Product Updates" description="News about new features and improvements" defaultChecked />
+                  <ToggleRow title="Usage Alerts" description="Warn when approaching limits" defaultChecked />
+                </Panel>
+              </div>
             </motion.div>
           </TabsContent>
 
-          {/* API Tab */}
           <TabsContent value="api">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-6"
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>API Keys</CardTitle>
-                  <CardDescription>
-                    Manage your API keys for programmatic access
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="p-4 rounded-lg bg-secondary/50 border border-border">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <p className="font-medium">Production Key</p>
-                        <p className="text-sm text-muted-foreground">
-                          Created on May 1, 2026
-                        </p>
-                      </div>
-                      <Badge variant="secondary">Active</Badge>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 relative">
-                        <Input
-                          type={showApiKey ? "text" : "password"}
-                          value="sk-omni-xxxxxxxxxxxxxxxxxxxx"
-                          readOnly
-                          className="pr-20 font-mono text-sm"
-                        />
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7"
-                            onClick={() => setShowApiKey(!showApiKey)}
-                          >
-                            {showApiKey ? (
-                              <EyeOff className="size-4" />
-                            ) : (
-                              <Eye className="size-4" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7"
-                            onClick={handleCopyKey}
-                          >
-                            {copiedKey ? (
-                              <Check className="size-4 text-success" />
-                            ) : (
-                              <Copy className="size-4" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between">
+            <motion.div {...fadeIn} className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+              <Panel title="API Keys" description="Programmatic access for trusted services">
+                <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                  <div className="mb-4 flex items-center justify-between gap-4">
                     <div>
-                      <p className="font-medium">Generate New Key</p>
-                      <p className="text-sm text-muted-foreground">
-                        This will invalidate your current key
-                      </p>
+                      <p className="font-medium">Production Key</p>
+                      <p className="text-sm text-muted-foreground">Created on May 1, 2026</p>
                     </div>
-                    <Button variant="outline">
-                      <RefreshCw data-icon="inline-start" />
-                      Regenerate
-                    </Button>
+                    <Badge className="bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/15">Active</Badge>
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="relative">
+                    <Input
+                      type={showApiKey ? "text" : "password"}
+                      value="sk-omni-xxxxxxxxxxxxxxxxxxxx"
+                      readOnly
+                      className="pr-20 font-mono text-sm"
+                    />
+                    <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+                      <Button variant="ghost" size="icon" className="size-7" onClick={() => setShowApiKey(!showApiKey)} aria-label="Toggle API key visibility">
+                        {showApiKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </Button>
+                      <Button variant="ghost" size="icon" className="size-7" onClick={handleCopyKey} aria-label="Copy API key">
+                        {copiedKey ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Webhooks</CardTitle>
-                  <CardDescription>
-                    Configure webhook endpoints for events
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
+                <div className="flex flex-col justify-between gap-4 rounded-lg bg-white/[0.03] p-3 ring-1 ring-white/5 sm:flex-row sm:items-center">
+                  <div>
+                    <p className="font-medium">Generate New Key</p>
+                    <p className="text-sm text-muted-foreground">This will invalidate your current key.</p>
+                  </div>
+                  <Button variant="outline" className="border-white/10 bg-white/[0.03] hover:bg-white/[0.07]">
+                    <RefreshCw data-icon="inline-start" />
+                    Regenerate
+                  </Button>
+                </div>
+              </Panel>
+
+              <Panel title="Rate Limits" description="Current API capacity">
+                <div className="grid gap-3">
+                  <MetricTile value="1,000" label="Requests/minute" />
+                  <MetricTile value="100K" label="Tokens/minute" />
+                  <MetricTile value="10MB" label="Max file size" />
+                </div>
+              </Panel>
+
+              <Panel title="Webhooks" description="Event streams for connected systems" className="lg:col-span-2">
+                <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
                   <div className="space-y-2">
                     <Label htmlFor="webhookUrl">Webhook URL</Label>
-                    <Input
-                      id="webhookUrl"
-                      type="url"
-                      placeholder="https://your-domain.com/webhook"
-                    />
+                    <Input id="webhookUrl" type="url" placeholder="https://your-domain.com/webhook" />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Events</Label>
-                    <div className="space-y-2">
-                      {["message.created", "chat.completed", "error.occurred"].map(
-                        (event) => (
-                          <div key={event} className="flex items-center gap-2">
-                            <Switch id={event} />
-                            <Label htmlFor={event} className="font-mono text-sm">
-                              {event}
-                            </Label>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Rate Limits</CardTitle>
-                  <CardDescription>
-                    Your current API rate limits
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="p-4 rounded-lg bg-secondary/50">
-                      <p className="text-2xl font-bold">1,000</p>
-                      <p className="text-sm text-muted-foreground">
-                        Requests/minute
-                      </p>
-                    </div>
-                    <div className="p-4 rounded-lg bg-secondary/50">
-                      <p className="text-2xl font-bold">100K</p>
-                      <p className="text-sm text-muted-foreground">
-                        Tokens/minute
-                      </p>
-                    </div>
-                    <div className="p-4 rounded-lg bg-secondary/50">
-                      <p className="text-2xl font-bold">10MB</p>
-                      <p className="text-sm text-muted-foreground">
-                        Max file size
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </TabsContent>
-
-          {/* Billing Tab */}
-          <TabsContent value="billing">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-6"
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Current Plan</CardTitle>
-                  <CardDescription>
-                    Manage your subscription and billing
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between p-4 rounded-lg bg-primary/10 border border-primary/20 mb-6">
-                    <div className="flex items-center gap-4">
-                      <div className="size-12 rounded-lg bg-primary/20 flex items-center justify-center">
-                        <Zap className="size-6 text-primary" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-lg font-semibold">Pro Plan</p>
-                          <Badge>Current</Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          $20/month, billed monthly
-                        </p>
-                      </div>
-                    </div>
-                    <Button variant="outline">Change Plan</Button>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Next billing date</span>
-                      <span>June 15, 2026</span>
-                    </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Payment method</span>
-                      <span>Visa ending in 4242</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Usage This Month</CardTitle>
-                  <CardDescription>
-                    Track your current usage
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-6">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span>Messages</span>
-                        <span className="text-muted-foreground">
-                          Unlimited
-                        </span>
-                      </div>
-                      <div className="h-2 rounded-full bg-secondary overflow-hidden">
-                        <div className="h-full w-1/3 rounded-full bg-primary" />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        12,847 messages sent
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span>API Calls</span>
-                        <span className="text-muted-foreground">
-                          45,200 / 100,000
-                        </span>
-                      </div>
-                      <div className="h-2 rounded-full bg-secondary overflow-hidden">
-                        <div className="h-full w-[45%] rounded-full bg-chart-2" />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span>Storage</span>
-                        <span className="text-muted-foreground">
-                          2.4 GB / 10 GB
-                        </span>
-                      </div>
-                      <div className="h-2 rounded-full bg-secondary overflow-hidden">
-                        <div className="h-full w-[24%] rounded-full bg-chart-3" />
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Billing History</CardTitle>
-                  <CardDescription>
-                    Download your past invoices
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {[
-                      { date: "May 15, 2026", amount: "$20.00", status: "Paid" },
-                      { date: "Apr 15, 2026", amount: "$20.00", status: "Paid" },
-                      { date: "Mar 15, 2026", amount: "$20.00", status: "Paid" },
-                    ].map((invoice, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between py-3 border-b border-border last:border-0"
-                      >
-                        <div>
-                          <p className="font-medium">{invoice.date}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Pro Plan - Monthly
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <Badge variant="secondary" className="text-success bg-success/10">
-                            {invoice.status}
-                          </Badge>
-                          <span className="font-medium">{invoice.amount}</span>
-                          <Button variant="ghost" size="sm">
-                            Download
-                          </Button>
-                        </div>
+                  <div className="grid gap-2">
+                    {["message.created", "chat.completed", "error.occurred"].map((event) => (
+                      <div key={event} className="flex items-center gap-3 rounded-lg bg-white/[0.03] px-3 py-2 ring-1 ring-white/5">
+                        <Switch id={event} />
+                        <Label htmlFor={event} className="font-mono text-sm">{event}</Label>
                       </div>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </Panel>
+            </motion.div>
+          </TabsContent>
 
-              <Card className="border-destructive/50">
-                <CardHeader>
-                  <CardTitle className="text-destructive">Danger Zone</CardTitle>
-                  <CardDescription>
-                    Irreversible actions for your account
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
+          <TabsContent value="billing">
+            <motion.div {...fadeIn} className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+              <Panel title="Current Plan" description="Subscription and payment controls">
+                <div className="flex flex-col justify-between gap-4 rounded-lg border border-primary/20 bg-primary/10 p-4 sm:flex-row sm:items-center">
+                  <div className="flex items-center gap-4">
+                    <div className="flex size-12 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/25">
+                      <Zap className="size-6 text-primary" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-lg font-semibold">Pro Plan</p>
+                        <Badge>Current</Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">$20/month, billed monthly</p>
+                    </div>
+                  </div>
+                  <Button variant="outline" className="border-white/10 bg-white/[0.03] hover:bg-white/[0.07]">Change Plan</Button>
+                </div>
+
+                <div className="grid gap-3 text-sm">
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Next billing date</span><span>June 15, 2026</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Payment method</span><span>Visa ending in 4242</span></div>
+                </div>
+              </Panel>
+
+              <Panel title="Usage This Month" description="Capacity and utilization">
+                {[
+                  { label: "Messages", value: "12,847 sent", percent: "33%", color: "bg-primary" },
+                  { label: "API Calls", value: "45,200 / 100,000", percent: "45%", color: "bg-cyan-300" },
+                  { label: "Storage", value: "2.4 GB / 10 GB", percent: "24%", color: "bg-emerald-300" },
+                ].map((item) => (
+                  <div key={item.label} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span>{item.label}</span>
+                      <span className="text-muted-foreground">{item.value}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
+                      <div className={`h-full rounded-full ${item.color}`} style={{ width: item.percent }} />
+                    </div>
+                  </div>
+                ))}
+              </Panel>
+
+              <Panel title="Billing History" description="Past invoices and receipts" className="lg:col-span-2">
+                <div className="divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10">
+                  {[
+                    { date: "May 15, 2026", amount: "$20.00", status: "Paid" },
+                    { date: "Apr 15, 2026", amount: "$20.00", status: "Paid" },
+                    { date: "Mar 15, 2026", amount: "$20.00", status: "Paid" },
+                  ].map((invoice) => (
+                    <div key={invoice.date} className="grid gap-3 bg-white/[0.025] p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                      <div>
+                        <p className="font-medium">{invoice.date}</p>
+                        <p className="text-sm text-muted-foreground">Pro Plan - Monthly</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Badge variant="secondary" className="bg-success/10 text-success">{invoice.status}</Badge>
+                        <span className="font-medium">{invoice.amount}</span>
+                        <Button variant="ghost" size="sm">
+                          <Download data-icon="inline-start" />
+                          Download
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+
+              <Panel title="Account Boundary" description="Destructive subscription and account actions" className="border-destructive/40 lg:col-span-2">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.03] p-3 ring-1 ring-white/5">
                     <div>
                       <p className="font-medium">Cancel Subscription</p>
-                      <p className="text-sm text-muted-foreground">
-                        Downgrade to free plan at end of billing cycle
-                      </p>
+                      <p className="text-sm text-muted-foreground">Downgrade at end of billing cycle.</p>
                     </div>
-                    <Button variant="outline">Cancel Plan</Button>
+                    <Button variant="outline">Cancel</Button>
                   </div>
-                  <Separator />
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-4 rounded-lg bg-destructive/10 p-3 ring-1 ring-destructive/20">
                     <div>
                       <p className="font-medium">Delete Account</p>
-                      <p className="text-sm text-muted-foreground">
-                        Permanently delete all your data
-                      </p>
+                      <p className="text-sm text-muted-foreground">Permanently remove all workspace data.</p>
                     </div>
-                    <Button variant="destructive">Delete Account</Button>
+                    <Button variant="destructive">Delete</Button>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </Panel>
             </motion.div>
           </TabsContent>
         </Tabs>

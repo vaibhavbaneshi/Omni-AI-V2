@@ -147,15 +147,14 @@
   }
   body {
     @apply bg-background text-foreground antialiased selection:bg-primary/30;
-    /* subtle typographic improvements */
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
   }
   html {
     @apply font-sans scroll-smooth;
   }
   
   h1, h2, h3, h4, h5, h6 {
-    letter-spacing: -0.025em;
+    letter-spacing: 0;
   }
 }
 

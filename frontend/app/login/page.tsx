@@ -4,16 +4,17 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Sparkles, Mail, Lock, ArrowRight, Github, Chrome } from "lucide-react";
+import { Sparkles, Mail, Lock, ArrowRight, Code2, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
+import { createSession, useAuthRedirect } from "@/lib/auth";
 import { fadeUpVariant } from "@/lib/motion";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { redirect } = useAuthRedirect("/dashboard");
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,13 +23,13 @@ export default function LoginPage() {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate login - replace with actual auth
     await new Promise(resolve => setTimeout(resolve, 1000));
-    router.push("/chat");
+    createSession({ email });
+    router.replace(redirect);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050505]">
+    <div className="min-h-dvh flex items-center justify-center p-4 py-8 relative overflow-x-hidden bg-[#050505]">
       {/* Ambient Background */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,oklch(0.25_0.08_280),transparent_50%)] opacity-40" />
@@ -62,11 +63,11 @@ export default function LoginPage() {
           {/* Social Login Buttons */}
           <div className="grid grid-cols-2 gap-3 mb-6">
             <Button variant="outline" className="w-full bg-white/[0.02] border-white/5 hover:bg-white/5 hover:text-foreground transition-colors text-[13px] h-9" disabled={isLoading}>
-              <Github className="size-4 mr-2 opacity-70" />
+              <Code2 className="size-4 mr-2 opacity-70" />
               GitHub
             </Button>
             <Button variant="outline" className="w-full bg-white/[0.02] border-white/5 hover:bg-white/5 hover:text-foreground transition-colors text-[13px] h-9" disabled={isLoading}>
-              <Chrome className="size-4 mr-2 opacity-70" />
+              <Globe className="size-4 mr-2 opacity-70" />
               Google
             </Button>
           </div>
