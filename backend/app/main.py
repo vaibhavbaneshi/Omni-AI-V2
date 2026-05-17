@@ -18,6 +18,10 @@ from app.api.auth_routes import (
     router as auth_router
 )
 
+from app.api.oauth_routes import (
+    router as oauth_router
+)
+
 from app.api.session_routes import (
     router as session_router
 )
@@ -58,4 +62,5 @@ app.include_router(chat_router)
 app.include_router(upload_router)
 app.include_router(session_router)
 app.include_router(auth_router)
+app.include_router(oauth_router)
 app.include_router(session_router)

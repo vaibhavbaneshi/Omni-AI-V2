@@ -123,4 +123,18 @@ export async function uploadDocument(file: File, token?: string | null) {
   );
 }
 
+export type OAuthProviders = {
+  github: boolean;
+  google: boolean;
+};
+
+export async function getOAuthProviders() {
+  return apiRequest<OAuthProviders>("/auth/providers");
+}
+
+export function getOAuthStartUrl(provider: "github" | "google", nextPath = "/dashboard") {
+  const params = new URLSearchParams({ next: nextPath });
+  return `${API_BASE}/auth/${provider}?${params.toString()}`;
+}
+
 export { API_BASE };

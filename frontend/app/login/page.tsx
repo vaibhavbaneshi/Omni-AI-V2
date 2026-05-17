@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Sparkles, Mail, Lock, ArrowRight, Code2, Globe } from "lucide-react";
+import { Sparkles, Mail, Lock, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
 import { createSession, useAuthRedirect } from "@/lib/auth";
 import { ApiError, loginWithCredentials } from "@/lib/api";
 import { fadeUpVariant } from "@/lib/motion";
@@ -20,6 +21,13 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const oauthError = new URLSearchParams(window.location.search).get("error");
+    if (oauthError) {
+      setError(oauthError);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,17 +85,12 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Social Login Buttons */}
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <Button variant="outline" className="w-full bg-white/[0.02] border-white/5 hover:bg-white/5 hover:text-foreground transition-colors text-[13px] h-9" disabled={isLoading}>
-              <Code2 className="size-4 mr-2 opacity-70" />
-              GitHub
-            </Button>
-            <Button variant="outline" className="w-full bg-white/[0.02] border-white/5 hover:bg-white/5 hover:text-foreground transition-colors text-[13px] h-9" disabled={isLoading}>
-              <Globe className="size-4 mr-2 opacity-70" />
-              Google
-            </Button>
-          </div>
+          <SocialAuthButtons
+            nextPath={redirect}
+            disabled={isLoading}
+            onError={setError}
+            onClearError={() => setError(null)}
+          />
 
           <div className="relative mb-6">
             <div className="absolute inset-0 flex items-center">
