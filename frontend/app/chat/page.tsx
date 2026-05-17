@@ -38,10 +38,15 @@ import {
   Star,
   Clock,
   Command,
+  Database,
+  Loader2,
+  X,
+  File as FileIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { sidebarTransition, fadeUpVariant, premiumEasing, pulseAnimation } from "@/lib/motion";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -63,6 +68,10 @@ import {
   SelectValue,
   SelectGroup,
 } from "@/components/ui/select";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 type Message = {
   id: string;
@@ -367,14 +376,14 @@ Would you like me to elaborate on any of these points?`;
       <AnimatePresence mode="wait">
         {sidebarOpen && (
           <motion.aside
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 260, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
-            className="h-full border-r border-border/40 bg-[oklch(0.095_0.005_285)] flex flex-col"
+            initial={sidebarTransition.initial}
+            animate={sidebarTransition.animate}
+            exit={sidebarTransition.exit}
+            transition={sidebarTransition.transition}
+            className="h-full border-r border-white/5 bg-[#050505] flex flex-col"
           >
             {/* Sidebar Header */}
-            <div className="h-14 flex items-center justify-between px-4 border-b border-border/40">
+            <div className="h-14 flex items-center justify-between px-4 border-b border-white/5">
               <Link href="/" className="flex items-center gap-2.5">
                 <div className="size-6 rounded-md bg-gradient-to-br from-primary to-chart-2 flex items-center justify-center">
                   <Sparkles className="size-3.5 text-primary-foreground" />
@@ -417,7 +426,7 @@ Would you like me to elaborate on any of these points?`;
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/60" />
                 <Input
                   placeholder="Search..."
-                  className="pl-8 h-8 text-[13px] bg-background/50 border-border/40 focus:border-border focus:bg-background placeholder:text-muted-foreground/50"
+                  className="pl-8 h-8 text-[12px] bg-white/[0.02] border-white/5 focus:border-white/10 focus:bg-white/[0.04] placeholder:text-muted-foreground/50 transition-colors shadow-inner"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -458,7 +467,7 @@ Would you like me to elaborate on any of these points?`;
                 {folders.map((folder) => (
                   <div key={folder} className="mb-2">
                     <button
-                      className="flex items-center gap-2 px-2 py-1.5 w-full hover:bg-muted/30 rounded-md transition-colors"
+                      className="group flex items-center gap-2 px-2 py-1 w-full hover:bg-white/5 rounded-md transition-colors"
                       onClick={() => toggleFolder(folder)}
                     >
                       <ChevronRight
@@ -520,20 +529,20 @@ Would you like me to elaborate on any of these points?`;
             </ScrollArea>
 
             {/* Sidebar Footer */}
-            <div className="p-2 border-t border-border/40">
+            <div className="p-2 border-t border-white/5">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-muted/30 transition-colors">
-                    <Avatar className="size-7 ring-1 ring-border/50">
-                      <AvatarFallback className="bg-gradient-to-br from-primary/20 to-chart-2/20 text-[11px] font-medium">
+                  <button className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors group">
+                    <Avatar className="size-6 ring-1 ring-white/10">
+                      <AvatarFallback className="bg-gradient-to-br from-primary/20 to-chart-2/20 text-[10px] font-medium text-foreground">
                         JD
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1 text-left min-w-0">
-                      <p className="text-[13px] font-medium truncate leading-tight">John Doe</p>
-                      <p className="text-[11px] text-muted-foreground/60 truncate">Pro Plan</p>
+                      <p className="text-[12px] font-medium truncate leading-tight group-hover:text-foreground transition-colors text-muted-foreground">John Doe</p>
+                      <p className="text-[10px] text-muted-foreground/50 truncate">Pro Plan</p>
                     </div>
-                    <ChevronDown className="size-3.5 text-muted-foreground/50 shrink-0" />
+                    <ChevronDown className="size-3.5 text-muted-foreground/40 shrink-0 group-hover:text-muted-foreground/80 transition-colors" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-52">
@@ -647,9 +656,9 @@ Would you like me to elaborate on any of these points?`;
           <div className="max-w-[720px] mx-auto px-6 py-10">
             {activeChat?.messages.length === 0 && !isStreaming ? (
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, ease: "easeOut" }}
+                variants={fadeUpVariant}
+                initial="initial"
+                animate="animate"
                 className="text-center pt-20 pb-16"
               >
                 <motion.div 
@@ -694,15 +703,16 @@ Would you like me to elaborate on any of these points?`;
                 {activeChat?.messages.map((message, index) => (
                   <motion.div
                     key={message.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.02, duration: 0.3 }}
+                    variants={fadeUpVariant}
+                    initial="initial"
+                    animate="animate"
+                    transition={{ ...fadeUpVariant.transition, delay: index * 0.02 }}
                   >
                     {message.role === "user" ? (
                       <div className="flex justify-end">
                         <div className="max-w-[80%]">
-                          <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-3 shadow-sm">
-                            <p className="text-[14px] leading-relaxed whitespace-pre-wrap">
+                          <div className="bg-primary/10 text-foreground border border-primary/20 rounded-2xl rounded-br-sm px-5 py-3.5 shadow-sm">
+                            <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
                               {message.content}
                             </p>
                           </div>
@@ -713,34 +723,105 @@ Would you like me to elaborate on any of these points?`;
                       </div>
                     ) : (
                       <div className="group">
+                        {/* Reasoning / Tool Mock */}
+                        {index === activeChat.messages.length - 1 && !isStreaming && (
+                          <div className="flex items-center gap-3 mb-4">
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.02] border border-white/5 shadow-inner text-[11px] text-muted-foreground/80 font-medium cursor-pointer hover:bg-white/[0.04] transition-colors">
+                              <Brain className="size-3.5 text-primary" />
+                              <span>Thought process</span>
+                              <ChevronDown className="size-3 opacity-50 ml-1" />
+                            </div>
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.02] border border-white/5 shadow-inner text-[11px] text-muted-foreground/80 font-medium cursor-default">
+                              <Database className="size-3.5 text-blue-400" />
+                              <span>Memory updated</span>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Sources */}
                         {message.sources && message.sources.length > 0 && (
-                          <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-                            {message.sources.map((source, i) => (
-                              <a
-                                key={i}
-                                href={source.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/40 hover:bg-muted text-[12px] text-muted-foreground hover:text-foreground transition-colors shrink-0 ring-1 ring-border/30"
-                              >
-                                <Globe className="size-3" />
-                                <span className="truncate max-w-[140px]">{source.title}</span>
-                              </a>
-                            ))}
+                          <div className="mb-5">
+                            <p className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                              <Globe className="size-3" /> Sources
+                            </p>
+                            <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-none">
+                              {message.sources.map((source, i) => (
+                                <a
+                                  key={i}
+                                  href={source.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="group/source flex flex-col justify-center gap-1.5 px-3 py-2 w-[160px] rounded-xl bg-[#050505] border border-white/5 shadow-inner hover:bg-white/[0.03] transition-colors shrink-0"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <div className="size-4 rounded bg-white/10 flex items-center justify-center shrink-0">
+                                      <Globe className="size-2.5 text-muted-foreground group-hover/source:text-foreground transition-colors" />
+                                    </div>
+                                    <span className="text-[10px] text-muted-foreground/60 truncate group-hover/source:text-muted-foreground/80 transition-colors">
+                                      {(() => {
+                                        try { return new URL(source.url).hostname.replace('www.', ''); }
+                                        catch { return source.url; }
+                                      })()}
+                                    </span>
+                                  </div>
+                                  <span className="text-[12px] font-medium text-foreground/80 truncate group-hover/source:text-foreground transition-colors">{source.title}</span>
+                                </a>
+                              ))}
+                            </div>
                           </div>
                         )}
                         
                         {/* Message Content */}
-                        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[14px] prose-pre:bg-[oklch(0.12_0.005_285)] prose-pre:border prose-pre:border-border/40 prose-pre:rounded-xl prose-code:text-primary prose-code:font-normal prose-headings:font-semibold prose-h2:text-[16px] prose-h2:mt-6 prose-h2:mb-3 prose-h3:text-[14px] prose-h3:mt-4 prose-h3:mb-2 prose-ul:my-3 prose-li:my-1">
-                          <div className="whitespace-pre-wrap text-[14px] leading-[1.7]">{message.content}</div>
+                        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[15px] prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 prose-pre:shadow-none prose-pre:m-0 prose-code:text-primary prose-code:font-normal prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-headings:font-semibold prose-headings:tracking-tight prose-h2:text-[18px] prose-h2:mt-6 prose-h2:mb-4 prose-h3:text-[15px] prose-h3:mt-5 prose-h3:mb-2 prose-ul:my-3 prose-li:my-1 text-foreground/90">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              code({ node, inline, className, children, ...props }: any) {
+                                const match = /language-(\w+)/.exec(className || "");
+                                return !inline && match ? (
+                                  <div className="relative mt-4 mb-6 rounded-xl overflow-hidden border border-white/5 shadow-inner bg-[#050505]">
+                                    <div className="flex items-center justify-between px-4 py-2 bg-white/[0.02] border-b border-white/5 text-[11px] text-muted-foreground/60 font-medium">
+                                      <span>{match[1]}</span>
+                                      <button 
+                                        onClick={() => handleCopy(String(children).replace(/\n$/, ""), message.id)}
+                                        className="hover:text-foreground transition-colors flex items-center gap-1.5"
+                                      >
+                                        {copiedId === message.id ? <Check className="size-3" /> : <Copy className="size-3" />}
+                                        {copiedId === message.id ? "Copied" : "Copy"}
+                                      </button>
+                                    </div>
+                                    <SyntaxHighlighter
+                                      style={vscDarkPlus as any}
+                                      language={match[1]}
+                                      PreTag="div"
+                                      customStyle={{
+                                        margin: 0,
+                                        padding: "1rem",
+                                        background: "transparent",
+                                        fontSize: "13px",
+                                      }}
+                                      {...props}
+                                    >
+                                      {String(children).replace(/\n$/, "")}
+                                    </SyntaxHighlighter>
+                                  </div>
+                                ) : (
+                                  <code className={className} {...props}>
+                                    {children}
+                                  </code>
+                                );
+                              },
+                            }}
+                          >
+                            {message.content}
+                          </ReactMarkdown>
                         </div>
                         
                         {/* Message Actions */}
-                        <div className="flex items-center gap-2 mt-5 pt-3 border-t border-border/30">
-                          <div className="flex items-center gap-1.5">
-                            <div className="size-5 rounded bg-gradient-to-br from-primary to-chart-2 flex items-center justify-center">
-                              <Sparkles className="size-2.5 text-primary-foreground" />
+                        <div className="flex items-center gap-2 mt-6 pt-3 border-t border-white/5">
+                          <div className="flex items-center gap-2">
+                            <div className="size-5 rounded bg-primary/20 flex items-center justify-center border border-primary/30 shadow-[0_0_10px_rgba(var(--primary),0.15)]">
+                              <Sparkles className="size-2.5 text-primary" />
                             </div>
                             <span className="text-[11px] text-muted-foreground/60 font-medium">
                               {models.find((m) => m.id === message.model)?.name || "AI"}
@@ -802,42 +883,61 @@ Would you like me to elaborate on any of these points?`;
                 {/* Streaming Response */}
                 {isStreaming && (
                   <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
+                    variants={fadeUpVariant}
+                    initial="initial"
+                    animate="animate"
                     className="group"
                   >
                     {streamingContent ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[14px]">
-                        <div className="whitespace-pre-wrap text-[14px] leading-[1.7]">
-                          {streamingContent}
-                          <motion.span
-                            animate={{ opacity: [1, 0] }}
-                            transition={{ duration: 0.4, repeat: Infinity, repeatType: "reverse" }}
-                            className="inline-block w-[3px] h-[18px] ml-0.5 bg-primary rounded-full align-middle"
-                          />
-                        </div>
+                      <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[15px] prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 prose-pre:shadow-none prose-pre:m-0 prose-code:text-primary prose-code:font-normal prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-headings:font-semibold prose-headings:tracking-tight prose-h2:text-[18px] prose-h2:mt-6 prose-h2:mb-4 prose-h3:text-[15px] prose-h3:mt-5 prose-h3:mb-2 prose-ul:my-3 prose-li:my-1 text-foreground/90">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            code({ node, inline, className, children, ...props }: any) {
+                              const match = /language-(\w+)/.exec(className || "");
+                              return !inline && match ? (
+                                <div className="relative mt-4 mb-6 rounded-xl overflow-hidden border border-white/5 shadow-inner bg-[#050505]">
+                                  <div className="flex items-center justify-between px-4 py-2 bg-white/[0.02] border-b border-white/5 text-[11px] text-muted-foreground/60 font-medium">
+                                    <span>{match[1]}</span>
+                                  </div>
+                                  <SyntaxHighlighter
+                                    style={vscDarkPlus as any}
+                                    language={match[1]}
+                                    PreTag="div"
+                                    customStyle={{
+                                      margin: 0,
+                                      padding: "1rem",
+                                      background: "transparent",
+                                      fontSize: "13px",
+                                    }}
+                                    {...props}
+                                  >
+                                    {String(children).replace(/\n$/, "")}
+                                  </SyntaxHighlighter>
+                                </div>
+                              ) : (
+                                <code className={className} {...props}>
+                                  {children}
+                                </code>
+                              );
+                            },
+                          }}
+                        >
+                          {streamingContent + " █"}
+                        </ReactMarkdown>
                       </div>
                     ) : (
                       <div className="flex items-center gap-3">
-                        <div className="size-5 rounded bg-gradient-to-br from-primary to-chart-2 flex items-center justify-center">
-                          <Sparkles className="size-2.5 text-primary-foreground" />
+                        <div className="size-5 rounded bg-primary/20 flex items-center justify-center border border-primary/30 shadow-[0_0_10px_rgba(var(--primary),0.15)]">
+                          <Sparkles className="size-2.5 text-primary" />
                         </div>
                         <div className="flex items-center gap-2">
-                          <motion.div className="flex gap-1">
-                            {[0, 1, 2].map((i) => (
-                              <motion.span
-                                key={i}
-                                className="size-1.5 rounded-full bg-primary"
-                                animate={{ opacity: [0.3, 1, 0.3] }}
-                                transition={{
-                                  duration: 1,
-                                  repeat: Infinity,
-                                  delay: i * 0.2,
-                                }}
-                              />
-                            ))}
-                          </motion.div>
-                          <span className="text-[13px] text-muted-foreground">Thinking...</span>
+                          <Loader2 className="size-3.5 animate-spin text-primary" />
+                          <span className="text-[13px] font-medium text-foreground/80">Deep reasoning...</span>
+                        </div>
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.02] border border-white/5 shadow-inner ml-2">
+                          <Globe className="size-3 text-muted-foreground animate-pulse" />
+                          <span className="text-[11px] text-muted-foreground font-medium">Searching knowledge base...</span>
                         </div>
                       </div>
                     )}
@@ -852,12 +952,23 @@ Would you like me to elaborate on any of these points?`;
         {/* Input Area */}
         <div className="p-4 pt-2">
           <div className="max-w-[720px] mx-auto">
+            {/* Mock Upload State */}
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#050505] border border-white/5 shadow-inner group cursor-pointer hover:bg-white/[0.02] transition-colors">
+                <FileIcon className="size-3.5 text-blue-400" />
+                <span className="text-[11px] font-medium text-foreground/80 truncate max-w-[120px]">architecture_v2.pdf</span>
+                <button className="size-4 rounded-full bg-white/5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10 ml-1">
+                  <X className="size-2.5 text-muted-foreground hover:text-foreground" />
+                </button>
+              </div>
+            </div>
+
             <div className="relative">
-              <div className="bg-[oklch(0.12_0.005_285)] border border-border/40 rounded-2xl focus-within:border-primary/30 focus-within:ring-1 focus-within:ring-primary/10 transition-all shadow-lg shadow-black/5">
+              <div className="bg-white/[0.02] backdrop-blur-xl border border-white/5 rounded-2xl focus-within:border-primary/30 focus-within:ring-1 focus-within:ring-primary/10 focus-within:bg-white/[0.04] transition-all shadow-premium">
                 <textarea
                   ref={inputRef}
                   placeholder="Message Omni AI..."
-                  className="w-full min-h-[56px] max-h-[200px] resize-none bg-transparent px-4 py-4 pr-28 text-[14px] placeholder:text-muted-foreground/50 focus:outline-none leading-relaxed"
+                  className="w-full min-h-[56px] max-h-[200px] resize-none bg-transparent px-5 py-4 pr-32 text-[15px] placeholder:text-muted-foreground/40 focus:outline-none leading-relaxed"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -890,7 +1001,7 @@ Would you like me to elaborate on any of these points?`;
                   </Tooltip>
                   <Button
                     size="icon"
-                    className="size-8 rounded-lg bg-primary hover:bg-primary/90 shadow-sm"
+                    className={`size-8 rounded-lg transition-all duration-300 ${input.trim() && !isStreaming ? "glow-primary bg-primary text-primary-foreground hover:bg-primary/90" : "bg-white/5 text-muted-foreground/50"}`}
                     onClick={handleSend}
                     disabled={!input.trim() || isStreaming}
                   >
@@ -924,16 +1035,16 @@ function ChatItem({
 }) {
   return (
     <div
-      className={`group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all duration-100 ${
+      className={`group relative flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer transition-colors duration-150 ${
         active
-          ? "bg-muted/60 text-foreground"
-          : "text-muted-foreground/80 hover:bg-muted/30 hover:text-foreground"
+          ? "bg-white/5 text-foreground shadow-[inset_2px_0_0_0_rgba(var(--primary))]"
+          : "text-muted-foreground/70 hover:bg-white/[0.03] hover:text-foreground"
       }`}
       onClick={onClick}
     >
-      <Hash className="size-3.5 shrink-0 opacity-50" />
-      <span className="flex-1 text-[13px] truncate">{chat.title}</span>
-      <span className="text-[10px] text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity">
+      <Hash className={`size-3.5 shrink-0 ${active ? "text-primary" : "opacity-50"}`} />
+      <span className="flex-1 text-[12px] truncate font-medium">{chat.title}</span>
+      <span className={`text-[10px] ${active ? "text-muted-foreground/60" : "text-muted-foreground/40 opacity-0 group-hover:opacity-100"} transition-opacity`}>
         {formatTime(chat.timestamp)}
       </span>
       <DropdownMenu>

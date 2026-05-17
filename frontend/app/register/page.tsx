@@ -4,12 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Sparkles, Mail, Lock, User, ArrowRight, Github, Chrome, Check } from "lucide-react";
+import { Sparkles, Mail, Lock, User, ArrowRight, Github, Chrome } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
+import { fadeUpVariant } from "@/lib/motion";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -27,106 +27,72 @@ export default function RegisterPage() {
     router.push("/chat");
   };
 
-  const features = [
-    "100 free messages every month",
-    "Access to GPT-3.5 and more",
-    "Upload and analyze documents",
-    "No credit card required"
-  ];
-
   return (
-    <div className="min-h-screen flex">
-      {/* Left side - Decorative */}
-      <div className="hidden lg:flex flex-1 bg-gradient-to-br from-chart-2/10 via-background to-primary/10 items-center justify-center p-12 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_30%,oklch(0.2_0.08_200),transparent_50%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_70%,oklch(0.25_0.06_280),transparent_50%)]" />
-        
-        <motion.div 
-          className="relative z-10 max-w-lg"
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.7, delay: 0.2 }}
-        >
-          <div className="size-24 rounded-2xl bg-primary/20 flex items-center justify-center mb-8 glow-primary">
-            <Sparkles className="size-12 text-primary" />
-          </div>
-          <h2 className="text-3xl font-bold mb-4 text-balance">
-            Start building with AI today
-          </h2>
-          <p className="text-muted-foreground text-lg mb-8">
-            Join thousands of developers and power users who trust Omni AI for their daily workflow.
-          </p>
-
-          <ul className="space-y-3">
-            {features.map((feature) => (
-              <li key={feature} className="flex items-center gap-3">
-                <div className="size-5 rounded-full bg-success/20 flex items-center justify-center">
-                  <Check className="size-3 text-success" />
-                </div>
-                <span className="text-foreground">{feature}</span>
-              </li>
-            ))}
-          </ul>
-
-          {/* Floating elements */}
-          <div className="absolute -top-10 -right-10 size-20 rounded-full bg-chart-2/10 blur-xl" />
-          <div className="absolute -bottom-10 -left-10 size-32 rounded-full bg-primary/10 blur-xl" />
-        </motion.div>
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050505]">
+      {/* Ambient Background */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,oklch(0.25_0.08_280),transparent_50%)] opacity-40" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,oklch(0.2_0.06_200),transparent_50%)] opacity-30" />
+        <div className="absolute inset-0 bg-[url('/noise.png')] opacity-[0.02] mix-blend-overlay" />
       </div>
 
-      {/* Right side - Form */}
-      <div className="flex-1 flex items-center justify-center p-8">
-        <motion.div 
-          className="w-full max-w-md"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
+      <motion.div 
+        className="w-full max-w-[400px] relative z-10"
+        variants={fadeUpVariant}
+        initial="initial"
+        animate="animate"
+      >
+        <div className="bg-white/[0.02] backdrop-blur-2xl border border-white/5 rounded-3xl p-8 shadow-premium">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 mb-8">
-            <div className="size-10 rounded-lg bg-primary/20 flex items-center justify-center">
-              <Sparkles className="size-6 text-primary" />
-            </div>
-            <span className="text-2xl font-semibold">Omni AI</span>
-          </Link>
+          <div className="flex justify-center mb-8">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="size-10 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20 shadow-[0_0_15px_rgba(var(--primary),0.15)]">
+                <Sparkles className="size-5 text-primary" />
+              </div>
+            </Link>
+          </div>
 
-          <div className="space-y-2 mb-8">
-            <h1 className="text-3xl font-bold">Create your account</h1>
-            <p className="text-muted-foreground">
-              Get started with your free account
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-bold tracking-tight mb-2 text-foreground">Create account</h1>
+            <p className="text-[13px] text-muted-foreground/80">
+              Start building with Omni AI today
             </p>
           </div>
 
           {/* Social Login Buttons */}
           <div className="grid grid-cols-2 gap-3 mb-6">
-            <Button variant="outline" className="w-full" disabled={isLoading}>
-              <Github data-icon="inline-start" />
+            <Button variant="outline" className="w-full bg-white/[0.02] border-white/5 hover:bg-white/5 hover:text-foreground transition-colors text-[13px] h-9" disabled={isLoading}>
+              <Github className="size-4 mr-2 opacity-70" />
               GitHub
             </Button>
-            <Button variant="outline" className="w-full" disabled={isLoading}>
-              <Chrome data-icon="inline-start" />
+            <Button variant="outline" className="w-full bg-white/[0.02] border-white/5 hover:bg-white/5 hover:text-foreground transition-colors text-[13px] h-9" disabled={isLoading}>
+              <Chrome className="size-4 mr-2 opacity-70" />
               Google
             </Button>
           </div>
 
           <div className="relative mb-6">
-            <Separator />
-            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-2 text-xs text-muted-foreground">
-              or continue with email
-            </span>
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-white/5" />
+            </div>
+            <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
+              <span className="bg-[#0A0A0A] px-2 text-muted-foreground/50">
+                Or continue with email
+              </span>
+            </div>
           </div>
 
           {/* Register Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
+              <Label htmlFor="name" className="text-[12px] text-muted-foreground/80">Full Name</Label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/50" />
                 <Input 
                   id="name"
                   type="text" 
                   placeholder="John Doe"
-                  className="pl-10"
+                  className="pl-9 h-10 bg-white/[0.02] border-white/5 focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/30 text-[13px] placeholder:text-muted-foreground/30 shadow-inner transition-all"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
@@ -136,14 +102,14 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="text-[12px] text-muted-foreground/80">Email</Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/50" />
                 <Input 
                   id="email"
                   type="email" 
                   placeholder="you@example.com"
-                  className="pl-10"
+                  className="pl-9 h-10 bg-white/[0.02] border-white/5 focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/30 text-[13px] placeholder:text-muted-foreground/30 shadow-inner transition-all"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -153,14 +119,14 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className="text-[12px] text-muted-foreground/80">Password</Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/50" />
                 <Input 
                   id="password"
                   type="password" 
                   placeholder="••••••••"
-                  className="pl-10"
+                  className="pl-9 h-10 bg-white/[0.02] border-white/5 focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/30 text-[13px] placeholder:text-muted-foreground/30 shadow-inner transition-all"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -168,44 +134,41 @@ export default function RegisterPage() {
                   minLength={8}
                 />
               </div>
-              <p className="text-xs text-muted-foreground">
-                Must be at least 8 characters
-              </p>
             </div>
 
-            <div className="flex items-start gap-2">
-              <Checkbox id="terms" required className="mt-0.5" />
-              <Label htmlFor="terms" className="text-sm font-normal cursor-pointer leading-snug">
+            <div className="flex items-start gap-2 pt-1 pb-2">
+              <Checkbox id="terms" required className="mt-0.5 border-white/10 data-[state=checked]:bg-primary" />
+              <Label htmlFor="terms" className="text-[12px] text-muted-foreground/70 font-normal cursor-pointer leading-snug">
                 I agree to the{" "}
-                <Link href="/terms" className="text-primary hover:underline">Terms of Service</Link>
+                <Link href="/terms" className="text-primary/80 hover:text-primary hover:underline transition-colors">Terms of Service</Link>
                 {" "}and{" "}
-                <Link href="/privacy" className="text-primary hover:underline">Privacy Policy</Link>
+                <Link href="/privacy" className="text-primary/80 hover:text-primary hover:underline transition-colors">Privacy Policy</Link>
               </Label>
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="w-full h-10 bg-primary text-primary-foreground hover:bg-primary/90 glow-primary transition-all text-[13px] font-medium" disabled={isLoading}>
               {isLoading ? (
                 <span className="flex items-center gap-2">
                   <span className="size-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
                   Creating account...
                 </span>
               ) : (
-                <>
+                <span className="flex items-center justify-center gap-2 w-full">
                   Create Account
-                  <ArrowRight data-icon="inline-end" />
-                </>
+                  <ArrowRight className="size-4" />
+                </span>
               )}
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-muted-foreground">
+          <p className="mt-6 text-center text-[12px] text-muted-foreground/60">
             Already have an account?{" "}
             <Link href="/login" className="text-primary hover:underline font-medium">
               Sign in
             </Link>
           </p>
-        </motion.div>
-      </div>
+        </div>
+      </motion.div>
     </div>
   );
 }
