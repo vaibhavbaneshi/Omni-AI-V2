@@ -5,7 +5,7 @@ load_dotenv()
 
 class Settings:
 
-    APP_NAME = os.getenv("APP_NAME")
+    APP_NAME = os.getenv("APP_NAME", "OmniAI")
 
     MODEL_NAME = os.getenv("MODEL_NAME")
 
