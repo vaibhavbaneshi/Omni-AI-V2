@@ -33,9 +33,10 @@ client = chromadb.PersistentClient(
     path=settings.CHROMA_DB_PATH
 )
 
-collection = client.get_collection(
-    name=settings.COLLECTION_NAME
-)
+try:
+    collection = client.get_collection(name=settings.COLLECTION_NAME)
+except Exception:
+    collection = client.create_collection(name=settings.COLLECTION_NAME)
 
 # -----------------------------------
 # RETRIEVE CONTEXT
