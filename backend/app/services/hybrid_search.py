@@ -40,12 +40,16 @@ documents = all_docs["documents"]
 # BM25 INDEX
 # -----------------------------------
 
-tokenized_docs = [
-    doc.split()
-    for doc in documents
-]
+if not documents:
+    tokenized_docs = []
+    bm25 = None
+else:
+    tokenized_docs = [
+        doc.split()
+        for doc in documents
+    ]
 
-bm25 = BM25Okapi(tokenized_docs)
+    bm25 = BM25Okapi(tokenized_docs)
 
 # -----------------------------------
 # BM25 SEARCH
@@ -55,6 +59,9 @@ def bm25_search(
     query,
     top_k=3
 ):
+
+    if not bm25:
+        return []
 
     tokenized_query = query.split()
 
