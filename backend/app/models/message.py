@@ -26,6 +26,12 @@ class Message(Base):
         ForeignKey("chat_sessions.id")
     )
 
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        index=True
+    )
+
     role = Column(String)
 
     content = Column(String)

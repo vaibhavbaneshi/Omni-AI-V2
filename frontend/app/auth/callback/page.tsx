@@ -19,19 +19,29 @@ function AuthCallbackContent() {
     const next = searchParams.get("next") || "/dashboard";
 
     if (error) {
-      setMessage(error);
+      const messageTimeout = window.setTimeout(() => {
+        setMessage(error);
+      }, 0);
       const timeout = window.setTimeout(() => {
         router.replace(`/login?error=${encodeURIComponent(error)}`);
       }, 2500);
-      return () => window.clearTimeout(timeout);
+      return () => {
+        window.clearTimeout(messageTimeout);
+        window.clearTimeout(timeout);
+      };
     }
 
     if (!token || !email) {
-      setMessage("Invalid authentication response.");
+      const messageTimeout = window.setTimeout(() => {
+        setMessage("Invalid authentication response.");
+      }, 0);
       const timeout = window.setTimeout(() => {
         router.replace("/login");
       }, 2500);
-      return () => window.clearTimeout(timeout);
+      return () => {
+        window.clearTimeout(messageTimeout);
+        window.clearTimeout(timeout);
+      };
     }
 
     createSession({

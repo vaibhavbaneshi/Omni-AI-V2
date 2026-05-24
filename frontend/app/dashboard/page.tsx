@@ -8,6 +8,7 @@ import {
   BarChart3,
   Brain,
   Calendar,
+  ChevronDown,
   ChevronRight,
   Clock,
   Command,
@@ -17,6 +18,7 @@ import {
   FileText,
   Gauge,
   Layers3,
+  LogOut,
   MessageSquare,
   Plus,
   Radio,
@@ -27,12 +29,14 @@ import {
   Users,
   Zap,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import { getInitials, useRequireAuth } from "@/lib/auth";
+import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const stats = [
@@ -161,6 +165,7 @@ const fadeIn = {
 };
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { session, ready, authenticated } = useRequireAuth();
 
   if (!ready || !authenticated) {
@@ -169,6 +174,11 @@ export default function DashboardPage() {
 
   const displayName = session?.name?.split(" ")[0] || "John";
   const initials = getInitials(session?.name);
+
+  const handleLogout = () => {
+    clearSession();
+    router.replace("/login");
+  };
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-background text-foreground">
@@ -200,9 +210,31 @@ export default function DashboardPage() {
             <Link href="/settings" aria-label="Settings" className={buttonVariants({ variant: "ghost", size: "icon" })}>
               <Settings className="size-4" />
             </Link>
-            <Avatar className="size-8 ring-1 ring-white/10">
-              <AvatarFallback className="bg-primary/15 text-sm text-primary">{initials}</AvatarFallback>
-            </Avatar>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 rounded-full ring-1 ring-white/10 px-1.5 py-1 transition hover:ring-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/50">
+                  <Avatar className="size-8">
+                    <AvatarFallback className="bg-primary/15 text-sm text-primary">{initials}</AvatarFallback>
+                  </Avatar>
+                  <ChevronDown className="size-4 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings">
+                      <Settings data-icon="inline-start" />
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+                  <LogOut data-icon="inline-start" />
+                  Sign Out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>

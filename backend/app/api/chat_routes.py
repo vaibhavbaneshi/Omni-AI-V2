@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from fastapi import Depends
+import json
 
 from sqlalchemy.orm import Session
 
@@ -46,6 +47,8 @@ from app.services.summary_service import (
 from app.core.security import (
     get_current_user
 )
+from app.models.user import User
+from app.models.chat_session import ChatSession
 
 router = APIRouter()
 
@@ -54,9 +57,22 @@ router = APIRouter()
 def chat(
     query: str,
     session_id: int,
-    current_user: str = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.id == session_id,
+            ChatSession.user_id == current_user.id
+        )
+        .first()
+    )
+
+    if not session:
+        return {
+            "error": "Session not found"
+        }
 
     # SAVE USER MESSAGE
 
@@ -64,7 +80,8 @@ def chat(
         db=db,
         session_id=session_id,
         role="user",
-        content=query
+        content=query,
+        user_id=current_user.id
     )
 
     # GENERATE AI RESPONSE
@@ -77,7 +94,8 @@ def chat(
         db=db,
         session_id=session_id,
         role="assistant",
-        content=result["response"]
+        content=result["response"],
+        user_id=current_user.id
     )
 
     generate_summary(
@@ -91,9 +109,35 @@ def chat(
 def chat_stream(
     query: str,
     session_id: int,
-    current_user: str = Depends(get_current_user),
+    mode: str = "research",
+    workspace_id: str = "default",
+    collection_id: int | None = None,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.id == session_id,
+            ChatSession.user_id == current_user.id
+        )
+        .first()
+    )
+
+    if not session:
+        def not_found():
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "message": "Session not found"
+                }
+            ) + "\n"
+
+        return StreamingResponse(
+            not_found(),
+            media_type="application/x-ndjson",
+            status_code=404
+        )
 
     # -----------------------------------
     # SAVE USER MESSAGE
@@ -103,40 +147,17 @@ def chat_stream(
         db=db,
         session_id=session_id,
         role="user",
-        content=query
+        content=query,
+        user_id=current_user.id
     )
-
-    # -----------------------------------
-    # AGENT
-    # -----------------------------------
-
-    agent_result = tool_calling_agent(
-        query=query
-    )
-
-    print(
-        "TOOL USED:",
-        agent_result["tool"]
-    )
-
-    context = agent_result["context"]
 
     # -----------------------------------
     # HISTORY
     # -----------------------------------
 
     history = get_chat_history(
-        session_id=session_id
-    )
-
-    print(history)
-
-    # -----------------------------------
-    # SUMMARY
-    # -----------------------------------
-
-    summary = summarize_conversation(
-        history
+        session_id=session_id,
+        user_id=current_user.id
     )
 
     # -----------------------------------
@@ -149,18 +170,76 @@ def chat_stream(
 
         nonlocal complete_response
 
+        yield json.dumps(
+            {
+                "type": "status",
+                "phase": "routing",
+                "message": "Planning agent route"
+            }
+        ) + "\n"
+
+        try:
+            summary = summarize_conversation(
+                history
+            ) if history else ""
+        except Exception:
+            summary = ""
+
+        agent_result = tool_calling_agent(
+            query=query,
+            user_id=current_user.id,
+            db=db,
+            mode=mode,
+            workspace_id=workspace_id,
+            collection_id=collection_id,
+            session_id=session_id,
+            history=history
+        )
+
+        context = agent_result["context"]
+        sources = agent_result.get("sources", [])
+        tool_used = agent_result.get("tool", "rag")
+        strategy = agent_result.get("strategy", tool_used)
+        route = agent_result.get("route", {})
+        workspace_mode = agent_result.get("mode", mode)
+
+        yield json.dumps(
+            {
+                "type": "meta",
+                "tool": tool_used,
+                "strategy": strategy,
+                "mode": workspace_mode,
+                "route": route,
+                "sources": sources,
+                "source_groups": agent_result.get("source_groups", {}),
+                "tools": agent_result.get("tools", []),
+                "traces": agent_result.get("traces", []),
+                "memory": {
+                    "conversation_history": bool(history),
+                    "summary": bool(summary)
+                }
+            }
+        ) + "\n"
+
         generator = stream_response(
             query=query,
             context=context,
             history=history,
-            summary=summary
+            summary=summary,
+            mode=workspace_mode,
+            route=route
         )
 
         for token in generator:
 
             complete_response += token
 
-            yield token
+            yield json.dumps(
+                {
+                    "type": "token",
+                    "content": token
+                }
+            ) + "\n"
 
         # -----------------------------------
         # SAVE ASSISTANT RESPONSE
@@ -170,10 +249,17 @@ def chat_stream(
             db=db,
             session_id=session_id,
             role="assistant",
-            content=complete_response
+            content=complete_response,
+            user_id=current_user.id
         )
+
+        yield json.dumps(
+            {
+                "type": "done"
+            }
+        ) + "\n"
 
     return StreamingResponse(
         generate(),
-        media_type="text/plain"
+        media_type="application/x-ndjson"
     )

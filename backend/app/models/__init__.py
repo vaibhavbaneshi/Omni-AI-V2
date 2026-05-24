@@ -2,6 +2,15 @@ from app.models.conversation_summary import (
     ConversationSummary
 )
 
+from app.models.document import (
+    DocumentCollection,
+    DocumentRecord
+)
+
+from app.models.memory import (
+    UserMemory
+)
+
 from app.db.database import (
     engine,
     Base

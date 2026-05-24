@@ -16,7 +16,7 @@ client = chromadb.PersistentClient(
     path=settings.CHROMA_DB_PATH
 )
 
-collection = client.get_collection(
+collection = client.get_or_create_collection(
     name=settings.COLLECTION_NAME
 )
 
@@ -32,24 +32,65 @@ embedding_model = SentenceTransformer(
 # GET ALL DOCS
 # -----------------------------------
 
-all_docs = collection.get()
+def build_filter(
+    user_id=None,
+    workspace_id="default",
+    collection_id=None,
+    session_id=None
+):
 
-documents = all_docs["documents"]
+    filters = []
 
-# -----------------------------------
-# BM25 INDEX
-# -----------------------------------
+    if user_id is not None:
+        filters.append({"user_id": str(user_id)})
 
-if not documents:
-    tokenized_docs = []
-    bm25 = None
-else:
-    tokenized_docs = [
-        doc.split()
-        for doc in documents
-    ]
+    if workspace_id:
+        filters.append({"workspace_id": workspace_id})
 
-    bm25 = BM25Okapi(tokenized_docs)
+    if collection_id is not None:
+        filters.append({"collection_id": str(collection_id)})
+
+    if session_id is not None:
+        filters.append({"session_id": str(session_id)})
+
+    if len(filters) == 1:
+        return filters[0]
+
+    if filters:
+        return {
+            "$and": filters
+        }
+
+    return None
+
+
+def get_scoped_documents(
+    user_id=None,
+    workspace_id="default",
+    collection_id=None
+):
+
+    where_filter = build_filter(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id
+    )
+
+    if where_filter:
+        return collection.get(
+            where=where_filter,
+            include=[
+                "documents",
+                "metadatas"
+            ]
+        )
+
+    return collection.get(
+        include=[
+            "documents",
+            "metadatas"
+        ]
+    )
 
 # -----------------------------------
 # BM25 SEARCH
@@ -57,8 +98,28 @@ else:
 
 def bm25_search(
     query,
-    top_k=3
+    top_k=3,
+    user_id=None,
+    workspace_id="default",
+    collection_id=None
 ):
+
+    scoped = get_scoped_documents(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id
+    )
+    documents = scoped.get("documents", [])
+
+    if not documents:
+        return []
+
+    bm25 = BM25Okapi(
+        [
+            doc.split()
+            for doc in documents
+        ]
+    )
 
     if not bm25:
         return []
@@ -86,17 +147,31 @@ def bm25_search(
 
 def semantic_search(
     query,
-    top_k=3
+    top_k=3,
+    user_id=None,
+    workspace_id="default",
+    collection_id=None
 ):
 
     embedding = embedding_model.encode(
         query
     ).tolist()
 
-    results = collection.query(
-        query_embeddings=[embedding],
-        n_results=top_k
+    where_filter = build_filter(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id
     )
+
+    query_args = {
+        "query_embeddings": [embedding],
+        "n_results": top_k
+    }
+
+    if where_filter:
+        query_args["where"] = where_filter
+
+    results = collection.query(**query_args)
 
     return results["documents"][0]
 
@@ -106,15 +181,24 @@ def semantic_search(
 
 def hybrid_search(
     query,
-    top_k=5
+    top_k=5,
+    user_id=None,
+    workspace_id="default",
+    collection_id=None
 ):
 
     semantic_results = semantic_search(
-        query
+        query,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id
     )
 
     bm25_results = bm25_search(
-        query
+        query,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id
     )
 
     combined = list(
@@ -124,3 +208,63 @@ def hybrid_search(
     )
 
     return combined[:top_k]
+
+
+def semantic_search_with_metadata(
+    query,
+    top_k=5,
+    user_id=None,
+    workspace_id="default",
+    collection_id=None
+):
+
+    embedding = embedding_model.encode(
+        query
+    ).tolist()
+
+    where_filter = build_filter(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id
+    )
+
+    query_args = {
+        "query_embeddings": [embedding],
+        "n_results": top_k,
+        "include": [
+            "documents",
+            "metadatas",
+            "distances"
+        ]
+    }
+
+    if where_filter:
+        query_args["where"] = where_filter
+
+    results = collection.query(**query_args)
+
+    documents_result = results.get("documents", [[]])[0]
+    metadatas_result = results.get("metadatas", [[]])[0]
+    distances_result = results.get("distances", [[]])[0]
+
+    sources = []
+
+    for index, document in enumerate(documents_result):
+
+        metadata = metadatas_result[index] if index < len(metadatas_result) else {}
+        distance = distances_result[index] if index < len(distances_result) else None
+
+        sources.append(
+            {
+                "title": metadata.get("source", "Document") if metadata else "Document",
+                "source": metadata.get("source", "Document") if metadata else "Document",
+                "chunk": document,
+                "score": None if distance is None else round(max(0, 1 - distance), 4),
+                "strategy": "semantic",
+                "type": "document",
+                "url": None,
+                "metadata": metadata or {}
+            }
+        )
+
+    return sources

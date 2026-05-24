@@ -4,12 +4,22 @@ from fastapi import (
     APIRouter,
     UploadFile,
     File,
-    HTTPException
+    HTTPException,
+    Depends
 )
 
 from app.services.documents_services import (
-    process_document
+    process_document,
+    collection
 )
+
+from app.core.security import (
+    get_current_user
+)
+from app.db.session import get_db
+from app.models.document import DocumentCollection, DocumentRecord
+from app.models.user import User
+from sqlalchemy.orm import Session
 
 router = APIRouter()
 
@@ -19,7 +29,12 @@ ALLOWED_EXTENSIONS = {".pdf"}
 @router.post("/upload")
 
 async def upload_document(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    workspace_id: str = "default",
+    collection_id: int | None = None,
+    session_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     if not file.filename:
         raise HTTPException(
@@ -34,11 +49,56 @@ async def upload_document(
             detail="Only PDF uploads are supported"
         )
 
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    collection_record = None
+
+    if collection_id is not None:
+        collection_record = (
+            db.query(DocumentCollection)
+            .filter(
+                DocumentCollection.id == collection_id,
+                DocumentCollection.user_id == current_user.id
+            )
+            .first()
+        )
+
+        if not collection_record:
+            raise HTTPException(
+                status_code=404,
+                detail="Collection not found"
+            )
+
+    if collection_record is None:
+        collection_record = (
+            db.query(DocumentCollection)
+            .filter(
+                DocumentCollection.user_id == current_user.id,
+                DocumentCollection.workspace_id == workspace_id,
+                DocumentCollection.name == "Default"
+            )
+            .first()
+        )
+
+        if collection_record is None:
+            collection_record = DocumentCollection(
+                user_id=current_user.id,
+                workspace_id=workspace_id,
+                name="Default"
+            )
+            db.add(collection_record)
+            db.commit()
+            db.refresh(collection_record)
+
+    user_upload_dir = os.path.join(
+        UPLOAD_DIR,
+        str(current_user.id),
+        workspace_id
+    )
+
+    os.makedirs(user_upload_dir, exist_ok=True)
 
     safe_name = os.path.basename(file.filename)
     file_path = os.path.join(
-        UPLOAD_DIR,
+        user_upload_dir,
         safe_name
     )
 
@@ -48,14 +108,36 @@ async def upload_document(
 
         f.write(content)
 
+    document = DocumentRecord(
+        user_id=current_user.id,
+        workspace_id=workspace_id,
+        collection_id=collection_record.id,
+        filename=safe_name,
+        storage_path=file_path,
+        chunks_created=0
+    )
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+
     try:
 
         chunk_count = process_document(
             file_path=file_path,
-            filename=file.filename
+            filename=safe_name,
+            user_id=current_user.id,
+            workspace_id=workspace_id,
+            collection_id=collection_record.id,
+            session_id=session_id,
+            document_id=document.id
         )
 
+        document.chunks_created = chunk_count
+        db.commit()
+
     except Exception as e:
+        db.delete(document)
+        db.commit()
 
         raise HTTPException(
             status_code=400,
@@ -64,5 +146,150 @@ async def upload_document(
 
     return {
         "message": "Document uploaded successfully",
-        "chunks_created": chunk_count
+        "filename": safe_name,
+        "chunks_created": chunk_count,
+        "collection_id": collection_record.id,
+        "document_id": document.id
+    }
+
+
+@router.get("/documents")
+def list_documents(
+    workspace_id: str = "default",
+    collection_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    query = (
+        db.query(DocumentRecord)
+        .filter(
+            DocumentRecord.user_id == current_user.id,
+            DocumentRecord.workspace_id == workspace_id
+        )
+    )
+
+    if collection_id is not None:
+        query = query.filter(DocumentRecord.collection_id == collection_id)
+
+    records = query.order_by(DocumentRecord.created_at.desc()).all()
+
+    return {
+        "documents": [
+            {
+                "id": document.id,
+                "filename": document.filename,
+                "size": os.path.getsize(document.storage_path) if os.path.exists(document.storage_path) else 0,
+                "updated_at": document.created_at.timestamp() if document.created_at else 0,
+                "collection_id": document.collection_id,
+                "chunks_created": document.chunks_created
+            }
+            for document in records
+        ]
+    }
+
+
+@router.delete("/documents/{filename}")
+def delete_document(
+    filename: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+
+    safe_name = os.path.basename(filename)
+    document = (
+        db.query(DocumentRecord)
+        .filter(
+            DocumentRecord.user_id == current_user.id,
+            DocumentRecord.filename == safe_name
+        )
+        .first()
+    )
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found"
+        )
+
+    if os.path.exists(document.storage_path):
+        os.remove(document.storage_path)
+
+    matches = collection.get(
+        where={
+            "$and": [
+                {"source": safe_name},
+                {"user_id": str(current_user.id)},
+                {"document_id": str(document.id)}
+            ]
+        }
+    )
+
+    ids = matches.get("ids", [])
+
+    if ids:
+        collection.delete(
+            ids=ids
+        )
+
+    db.delete(document)
+    db.commit()
+
+    return {
+        "message": "Document deleted",
+        "filename": safe_name
+    }
+
+
+@router.get("/collections")
+def list_collections(
+    workspace_id: str = "default",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+
+    collections = (
+        db.query(DocumentCollection)
+        .filter(
+            DocumentCollection.user_id == current_user.id,
+            DocumentCollection.workspace_id == workspace_id
+        )
+        .order_by(DocumentCollection.created_at.desc())
+        .all()
+    )
+
+    return {
+        "collections": [
+            {
+                "id": collection_item.id,
+                "name": collection_item.name,
+                "workspace_id": collection_item.workspace_id,
+                "created_at": collection_item.created_at.isoformat() if collection_item.created_at else None
+            }
+            for collection_item in collections
+        ]
+    }
+
+
+@router.post("/collections")
+def create_collection(
+    name: str,
+    workspace_id: str = "default",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+
+    collection_record = DocumentCollection(
+        user_id=current_user.id,
+        workspace_id=workspace_id,
+        name=name
+    )
+
+    db.add(collection_record)
+    db.commit()
+    db.refresh(collection_record)
+
+    return {
+        "id": collection_record.id,
+        "name": collection_record.name,
+        "workspace_id": collection_record.workspace_id
     }

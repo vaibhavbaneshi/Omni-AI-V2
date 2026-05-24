@@ -92,7 +92,12 @@ def chunk_text(text: str):
 
 def store_chunks(
     chunks,
-    filename
+    filename,
+    user_id,
+    workspace_id="default",
+    collection_id=None,
+    session_id=None,
+    document_id=None
 ):
 
     embeddings = embedding_model.encode(
@@ -106,9 +111,17 @@ def store_chunks(
 
     metadatas = [
         {
-            "source": filename
+            "source": filename,
+            "filename": filename,
+            "user_id": str(user_id),
+            "workspace_id": workspace_id,
+            "collection_id": str(collection_id or "default"),
+            "session_id": str(session_id or ""),
+            "document_id": str(document_id or ""),
+            "chunk_index": index,
+            "embedding_version": "bge-small-en-v1.5"
         }
-        for _ in chunks
+        for index, _ in enumerate(chunks)
     ]
 
     collection.add(
@@ -124,7 +137,12 @@ def store_chunks(
 
 def process_document(
     file_path: str,
-    filename: str
+    filename: str,
+    user_id: int,
+    workspace_id: str = "default",
+    collection_id: int | None = None,
+    session_id: int | None = None,
+    document_id: int | None = None
 ):
 
     text = load_pdf(file_path)
@@ -133,7 +151,12 @@ def process_document(
 
     store_chunks(
         chunks=chunks,
-        filename=filename
+        filename=filename,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id,
+        session_id=session_id,
+        document_id=document_id
     )
 
     return len(chunks)

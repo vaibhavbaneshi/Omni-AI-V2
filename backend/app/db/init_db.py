@@ -13,6 +13,13 @@ from app.models.message import (
 
 from app.models.user import User
 
+from app.models.document import (
+    DocumentCollection,
+    DocumentRecord
+)
+
+from app.models.memory import UserMemory
+
 def init_db():
 
     Base.metadata.create_all(

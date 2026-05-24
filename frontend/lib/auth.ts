@@ -131,7 +131,11 @@ export function useAuthRedirect(defaultPath = "/dashboard") {
   useEffect(() => {
     const next =
       new URLSearchParams(window.location.search).get("redirect") || defaultPath;
-    setRedirect(next);
+    const id = window.setTimeout(() => {
+      setRedirect(next);
+    }, 0);
+
+    return () => window.clearTimeout(id);
   }, [defaultPath]);
 
   useEffect(() => {

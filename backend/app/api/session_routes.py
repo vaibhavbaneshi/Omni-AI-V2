@@ -25,7 +25,8 @@ router = APIRouter()
 
 def create_session(
     first_message: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
 
     title = generate_chat_title(
@@ -33,7 +34,8 @@ def create_session(
     )
 
     new_session = ChatSession(
-        title=title
+        title=title,
+        user_id=current_user.id
     )
 
     db.add(new_session)
@@ -50,16 +52,24 @@ def create_session(
 @router.get("/sessions")
 
 def get_sessions(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
 
     sessions = (
         db.query(ChatSession)
+        .filter(ChatSession.user_id == current_user.id)
         .order_by(ChatSession.id.desc())
         .all()
     )
 
-    return sessions
+    return [
+        {
+            "id": session.id,
+            "title": session.title
+        }
+        for session in sessions
+    ]
 
 # -----------------------------------
 # GET SESSION MESSAGES
@@ -69,19 +79,41 @@ def get_sessions(
 
 def get_session_messages(
     session_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.id == session_id,
+            ChatSession.user_id == current_user.id
+        )
+        .first()
+    )
+
+    if not session:
+        return []
 
     messages = (
         db.query(Message)
         .filter(
-            Message.session_id == session_id
+            Message.session_id == session_id,
+            Message.user_id == current_user.id
         )
         .order_by(Message.id.asc())
         .all()
     )
 
-    return messages
+    return [
+        {
+            "id": message.id,
+            "session_id": message.session_id,
+            "role": message.role,
+            "content": message.content,
+            "created_at": message.created_at.isoformat() if message.created_at else None
+        }
+        for message in messages
+    ]
 
 @router.post("/sessions")
 def create_session(
@@ -101,4 +133,7 @@ def create_session(
 
     db.refresh(session)
 
-    return session
+    return {
+        "id": session.id,
+        "title": session.title
+    }

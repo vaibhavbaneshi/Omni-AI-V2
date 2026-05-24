@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -40,13 +40,33 @@ import {
   Loader2,
   X,
   File as FileIcon,
+  UploadCloud,
+  Wrench,
+  ShieldCheck,
+  BookOpen,
+  AlertCircle,
+  PenLine,
+  BarChart3,
+  FlaskConical,
+  TerminalSquare,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sidebarTransition, fadeUpVariant } from "@/lib/motion";
 import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
-import { ApiError, uploadDocument } from "@/lib/api";
+import {
+  ApiError,
+  createChatSession,
+  getChatSessionMessages,
+  listChatSessions,
+  type DocumentRecord,
+  type StreamMeta,
+  type StreamSource,
+} from "@/lib/api";
+import { useChatStream } from "@/hooks/useChatStream";
+import { useDocuments } from "@/hooks/useDocuments";
+import { useMemory } from "@/hooks/useMemory";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -80,7 +100,13 @@ type Message = {
   content: string;
   timestamp: Date;
   model?: string;
-  sources?: { title: string; url: string }[];
+  sources?: SourceCitation[];
+  toolMeta?: StreamMeta;
+  status?: "complete" | "error";
+};
+
+type SourceCitation = StreamSource & {
+  url?: string;
 };
 
 type Chat = {
@@ -99,6 +125,33 @@ const models = [
   { id: "claude-3", name: "Claude 3 Opus", provider: "Anthropic", icon: Brain, badge: "Smart" },
   { id: "gemini-pro", name: "Gemini Pro", provider: "Google", icon: Sparkles, badge: null },
 ];
+
+const workspaceModes = [
+  {
+    id: "research",
+    name: "Research",
+    icon: FlaskConical,
+    status: "Web + docs",
+  },
+  {
+    id: "coding",
+    name: "Coding",
+    icon: TerminalSquare,
+    status: "Precise",
+  },
+  {
+    id: "writing",
+    name: "Writing",
+    icon: PenLine,
+    status: "Polished",
+  },
+  {
+    id: "analyst",
+    name: "Analyst",
+    icon: BarChart3,
+    status: "Structured",
+  },
+] as const;
 
 const initialChats: Chat[] = [
   {
@@ -157,8 +210,22 @@ Would you like me to show you specific examples for your component?`,
         timestamp: new Date(Date.now() - 1000 * 60 * 34),
         model: "gpt-4",
         sources: [
-          { title: "React Documentation - Optimization", url: "https://react.dev/learn" },
-          { title: "Web.dev Performance Guide", url: "https://web.dev/performance" },
+          {
+            title: "React Documentation - Optimization",
+            source: "react.dev",
+            chunk: "React memoization and rendering guidance for optimizing component updates.",
+            score: 0.92,
+            strategy: "demo",
+            url: "https://react.dev/learn",
+          },
+          {
+            title: "Web.dev Performance Guide",
+            source: "web.dev",
+            chunk: "Performance guidance for reducing layout shifts and improving perceived response time.",
+            score: 0.88,
+            strategy: "demo",
+            url: "https://web.dev/performance",
+          },
         ],
       },
     ],
@@ -198,19 +265,42 @@ export default function ChatPage() {
     return initialChats.find((chat) => chat.id === chatId) || initialChats[0];
   });
   const [selectedModel, setSelectedModel] = useState("gpt-4");
+  const [selectedMode, setSelectedMode] = useState<(typeof workspaceModes)[number]["id"]>("research");
   const [input, setInput] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingContent, setStreamingContent] = useState("");
+  const {
+    isStreaming,
+    streamingContent,
+    streamingMeta,
+    streamStatus,
+    streamError,
+    setStreamError,
+    start: startChatStream,
+  } = useChatStream();
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "up" | "down">>({});
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
-  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const {
+    documents,
+    collections,
+    activeCollectionId,
+    setActiveCollectionId,
+    status: uploadStatus,
+    message: uploadMessage,
+    setStatus: setUploadStatus,
+    setMessage: setUploadMessage,
+    refresh: refreshDocuments,
+    upload: uploadWorkspaceDocument,
+    remove: removeWorkspaceDocument,
+  } = useDocuments(session?.token);
+  const { memories, addMemory, removeMemory } = useMemory(session?.token);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [deletingDocument, setDeletingDocument] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [expandedFolders, setExpandedFolders] = useState<string[]>(["Work"]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const shouldStickToBottomRef = useRef(true);
 
   useEffect(() => {
     const syncSidebar = () => setSidebarOpen(window.innerWidth >= 1024);
@@ -227,13 +317,20 @@ export default function ChatPage() {
     }
   }, [activeChat]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    if (!shouldStickToBottomRef.current) return;
+    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [activeChat?.messages, streamingContent]);
+    scrollToBottom(isStreaming ? "auto" : "smooth");
+  }, [activeChat?.messages, isStreaming, scrollToBottom, streamingContent]);
+
+  const handleMessagesScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 120;
+  };
 
   useEffect(() => {
     if (inputRef.current) {
@@ -242,22 +339,60 @@ export default function ChatPage() {
     }
   }, [input]);
 
-  const simulateStreaming = async (fullContent: string) => {
-    setStreamingContent("");
-    const words = fullContent.split(" ");
-    
-    for (let i = 0; i < words.length; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 25 + Math.random() * 15));
-      setStreamingContent((prev) => prev + (i === 0 ? "" : " ") + words[i]);
-    }
-    
-    return fullContent;
-  };
+  useEffect(() => {
+    if (!authenticated || !session?.token) return;
 
-  const handleSend = async (overrideInput?: string) => {
+    listChatSessions(session.token)
+      .then((records) => {
+        if (records.length === 0) return;
+
+        const nextChats: Chat[] = records.map((record) => ({
+          id: String(record.id),
+          title: record.title,
+          lastMessage: "",
+          timestamp: new Date(),
+          messages: [],
+        }));
+
+        setChats(nextChats);
+        setActiveChat((current) => {
+          if (current && records.some((record) => String(record.id) === current.id)) {
+            return current;
+          }
+          return nextChats[0];
+        });
+      })
+      .catch(() => undefined);
+  }, [authenticated, session?.token]);
+
+  useEffect(() => {
+    const numericId = Number(activeChat?.id);
+
+    if (!session?.token || !activeChat || Number.isNaN(numericId)) return;
+    if (activeChat.messages.length > 0) return;
+
+    getChatSessionMessages(numericId, session.token)
+      .then((records) => {
+        const messages = records.map<Message>((record) => ({
+          id: String(record.id),
+          role: record.role,
+          content: record.content,
+          timestamp: record.created_at ? new Date(record.created_at) : new Date(),
+          model: record.role === "assistant" ? selectedModel : undefined,
+        }));
+
+        setActiveChat((current) => current?.id === activeChat.id ? { ...current, messages } : current);
+        setChats((prev) => prev.map((chat) => chat.id === activeChat.id ? { ...chat, messages } : chat));
+      })
+      .catch(() => undefined);
+  }, [activeChat, selectedModel, session?.token]);
+
+  const handleSend = async (overrideInput?: string, options?: { appendUser?: boolean; chatOverride?: Chat }) => {
     const messageText = (overrideInput ?? input).trim();
     if (!messageText || isStreaming) return;
+    shouldStickToBottomRef.current = true;
 
+    const appendUser = options?.appendUser ?? true;
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
@@ -267,70 +402,90 @@ export default function ChatPage() {
 
     const currentInput = messageText;
     setInput("");
+    setStreamError(null);
 
-    if (activeChat) {
+    let chatForRequest = options?.chatOverride || activeChat;
+
+    try {
+      if (!chatForRequest || Number.isNaN(Number(chatForRequest.id))) {
+        const created = await createChatSession(currentInput.slice(0, 80) || "New Chat", session?.token);
+        const createdChat: Chat = {
+          id: String(created.id),
+          title: created.title,
+          lastMessage: currentInput,
+          timestamp: new Date(),
+          messages: [],
+        };
+
+        chatForRequest = createdChat;
+        setActiveChat(createdChat);
+        setChats((prev) => [createdChat, ...prev.filter((chat) => chat.id !== activeChat?.id)]);
+      }
+
       const updatedChat = {
-        ...activeChat,
-        messages: [...activeChat.messages, userMessage],
+        ...chatForRequest,
+        messages: appendUser ? [...chatForRequest.messages, userMessage] : chatForRequest.messages,
         lastMessage: currentInput,
         timestamp: new Date(),
+        title: chatForRequest.title === "New Chat" ? currentInput.slice(0, 42) : chatForRequest.title,
       };
+
       setActiveChat(updatedChat);
-      setChats(chats.map((c) => (c.id === activeChat.id ? updatedChat : c)));
-    }
+      setChats((prev) => prev.map((c) => (c.id === updatedChat.id ? updatedChat : c)));
 
-    setIsStreaming(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
+      const streamResult = await startChatStream({
+        query: currentInput,
+        sessionId: Number(updatedChat.id),
+        mode: selectedMode,
+        collectionId: activeCollectionId,
+        token: session?.token,
+      });
 
-    const responseContent = `Based on your question, here's a comprehensive answer:
-
-## Overview
-
-This is a simulated streaming response that demonstrates the enhanced UX. In a real implementation, this would be streamed from your AI backend using Server-Sent Events or WebSockets.
-
-### Key Points
-
-1. **Real-time streaming** provides immediate feedback to users
-2. **Markdown rendering** makes responses readable and well-formatted
-3. **Source citations** help users verify information
-
-The response would include proper formatting, code blocks, and other rich content based on the selected model configuration.
-
-\`\`\`typescript
-// Example code block
-const response = await fetch('/api/chat', {
-  method: 'POST',
-  body: JSON.stringify({ message, model })
-});
-\`\`\`
-
-Would you like me to elaborate on any of these points?`;
-
-    const finalContent = await simulateStreaming(responseContent);
-
-    const aiMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: "assistant",
-      content: finalContent,
-      timestamp: new Date(),
-      model: selectedModel,
-      sources: [
-        { title: "Documentation Reference", url: "https://docs.example.com" },
-        { title: "API Guide", url: "https://api.example.com/guide" },
-      ],
-    };
-
-    if (activeChat) {
-      const updatedChat = {
-        ...activeChat,
-        messages: [...activeChat.messages, userMessage, aiMessage],
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: streamResult.content,
+        timestamp: new Date(),
+        model: selectedModel,
+        sources: streamResult.sources,
+        toolMeta: streamResult.meta || undefined,
+        status: "complete",
       };
-      setActiveChat(updatedChat);
-      setChats(chats.map((c) => (c.id === activeChat.id ? updatedChat : c)));
-    }
 
-    setIsStreaming(false);
-    setStreamingContent("");
+      const completedChat = {
+        ...updatedChat,
+        messages: [...updatedChat.messages, aiMessage],
+      };
+
+      setActiveChat(completedChat);
+      setChats((prev) => prev.map((c) => (c.id === completedChat.id ? completedChat : c)));
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "The response stream failed. Check the backend and try again.";
+
+      setStreamError(message);
+
+      if (chatForRequest) {
+        const failedMessage: Message = {
+          id: (Date.now() + 2).toString(),
+          role: "assistant",
+          content: message,
+          timestamp: new Date(),
+          model: selectedModel,
+          status: "error",
+        };
+
+        const failedChat = {
+          ...chatForRequest,
+          messages: [...chatForRequest.messages, ...(appendUser ? [userMessage] : []), failedMessage],
+        };
+
+        setActiveChat(failedChat);
+        setChats((prev) => prev.map((c) => (c.id === failedChat.id ? failedChat : c)));
+      }
+    }
   };
 
   const handleNewChat = () => {
@@ -395,7 +550,18 @@ Would you like me to elaborate on any of these points?`;
   const handleRegenerate = async () => {
     const lastUserMessage = [...(activeChat?.messages || [])].reverse().find((message) => message.role === "user");
     if (!lastUserMessage || isStreaming) return;
-    await handleSend(lastUserMessage.content);
+    let trimmedChat = activeChat;
+    if (activeChat) {
+      const trimmedMessages = [...activeChat.messages];
+      while (trimmedMessages.length > 0 && trimmedMessages[trimmedMessages.length - 1].role === "assistant") {
+        trimmedMessages.pop();
+      }
+      const nextTrimmedChat = { ...activeChat, messages: trimmedMessages };
+      trimmedChat = nextTrimmedChat;
+      setActiveChat(nextTrimmedChat);
+      setChats((prev) => prev.map((chat) => chat.id === nextTrimmedChat.id ? nextTrimmedChat : chat));
+    }
+    await handleSend(lastUserMessage.content, { appendUser: false, chatOverride: trimmedChat || undefined });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -436,6 +602,7 @@ Would you like me to elaborate on any of these points?`;
   };
 
   const currentModel = models.find((m) => m.id === selectedModel);
+  const currentMode = workspaceModes.find((mode) => mode.id === selectedMode) || workspaceModes[0];
   const initials = getInitials(session?.name);
   const displayName = session?.name || "John Doe";
 
@@ -448,10 +615,7 @@ Would you like me to elaborate on any of these points?`;
     fileInputRef.current?.click();
   };
 
-  const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-
+  const processSelectedFile = async (file: File) => {
     if (!file) return;
 
     if (!file.name.toLowerCase().endsWith(".pdf")) {
@@ -466,11 +630,7 @@ Would you like me to elaborate on any of these points?`;
     setUploadMessage(null);
 
     try {
-      const result = await uploadDocument(file, session?.token);
-      setUploadStatus("success");
-      setUploadMessage(
-        `${result.message} (${result.chunks_created} chunks indexed)`
-      );
+      await uploadWorkspaceDocument(file);
     } catch (error) {
       setUploadStatus("error");
       setUploadMessage(
@@ -481,11 +641,53 @@ Would you like me to elaborate on any of these points?`;
     }
   };
 
+  const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (file) {
+      await processSelectedFile(file);
+    }
+  };
+
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDraggingFile(false);
+    const file = event.dataTransfer.files?.[0];
+
+    if (file) {
+      await processSelectedFile(file);
+    }
+  };
+
   const handleRemoveAttachment = () => {
     setAttachedFile(null);
     setUploadStatus("idle");
     setUploadMessage(null);
   };
+
+  const handleDeleteDocument = async (filename: string) => {
+    setDeletingDocument(filename);
+
+    try {
+      await removeWorkspaceDocument(filename);
+      await refreshDocuments();
+      setUploadStatus("success");
+      setUploadMessage(`${filename} removed from knowledge base.`);
+    } catch (error) {
+      setUploadStatus("error");
+      setUploadMessage(error instanceof ApiError ? error.message : "Could not remove document.");
+    } finally {
+      setDeletingDocument(null);
+    }
+  };
+
+  const memoryFacts = [
+    ...(session?.name ? [session.name] : []),
+    ...(documents.length > 0 ? [`${documents.length} document${documents.length === 1 ? "" : "s"}`] : []),
+    ...(memories.length > 0 ? [`${memories.length} memor${memories.length === 1 ? "y" : "ies"}`] : []),
+    ...(activeChat?.messages.length ? ["conversation context"] : []),
+  ];
 
   if (!ready || !authenticated) {
     return <div className="min-h-dvh bg-background" />;
@@ -758,6 +960,28 @@ Would you like me to elaborate on any of these points?`;
                 </SelectGroup>
               </SelectContent>
             </Select>
+
+            <div className="hidden items-center gap-1 rounded-lg border border-white/5 bg-white/[0.02] p-1 md:flex">
+              {workspaceModes.map((mode) => (
+                <Tooltip key={mode.id}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition-colors ${
+                        selectedMode === mode.id
+                          ? "bg-primary/15 text-foreground"
+                          : "text-muted-foreground/65 hover:bg-white/[0.04] hover:text-foreground"
+                      }`}
+                      onClick={() => setSelectedMode(mode.id)}
+                    >
+                      <mode.icon className="size-3.5" />
+                      <span>{mode.name}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{mode.status}</TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
@@ -767,6 +991,13 @@ Would you like me to elaborate on any of these points?`;
             >
               <span className="size-1.5 rounded-full bg-success animate-pulse" />
               Pro Search
+            </Badge>
+            <Badge
+              variant="outline"
+              className="hidden h-6 gap-1.5 border-white/10 bg-white/[0.02] px-2.5 text-[10px] font-normal text-muted-foreground md:inline-flex"
+            >
+              <currentMode.icon className="size-3 text-primary" />
+              {currentMode.name} Mode
             </Badge>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -790,7 +1021,7 @@ Would you like me to elaborate on any of these points?`;
         </header>
 
         {/* Messages Area */}
-        <ScrollArea className="min-h-0 flex-1">
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin" onScroll={handleMessagesScroll}>
           <div className="mx-auto max-w-[720px] px-4 py-8 sm:px-6 sm:py-10">
             {activeChat?.messages.length === 0 && !isStreaming ? (
               <motion.div
@@ -861,53 +1092,8 @@ Would you like me to elaborate on any of these points?`;
                       </div>
                     ) : (
                       <div className="group">
-                        {/* Reasoning / Tool Mock */}
-                        {index === activeChat.messages.length - 1 && !isStreaming && (
-                          <div className="flex items-center gap-3 mb-4">
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.02] border border-white/5 shadow-inner text-[11px] text-muted-foreground/80 font-medium cursor-pointer hover:bg-white/[0.04] transition-colors">
-                              <Brain className="size-3.5 text-primary" />
-                              <span>Thought process</span>
-                              <ChevronDown className="size-3 opacity-50 ml-1" />
-                            </div>
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.02] border border-white/5 shadow-inner text-[11px] text-muted-foreground/80 font-medium cursor-default">
-                              <Database className="size-3.5 text-blue-400" />
-                              <span>Memory updated</span>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Sources */}
-                        {message.sources && message.sources.length > 0 && (
-                          <div className="mb-5">
-                            <p className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                              <Globe className="size-3" /> Sources
-                            </p>
-                            <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-none">
-                              {message.sources.map((source, i) => (
-                                <a
-                                  key={i}
-                                  href={source.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="group/source flex flex-col justify-center gap-1.5 px-3 py-2 w-[160px] rounded-xl bg-[#050505] border border-white/5 shadow-inner hover:bg-white/[0.03] transition-colors shrink-0"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <div className="size-4 rounded bg-white/10 flex items-center justify-center shrink-0">
-                                      <Globe className="size-2.5 text-muted-foreground group-hover/source:text-foreground transition-colors" />
-                                    </div>
-                                    <span className="text-[10px] text-muted-foreground/60 truncate group-hover/source:text-muted-foreground/80 transition-colors">
-                                      {(() => {
-                                        try { return new URL(source.url).hostname.replace('www.', ''); }
-                                        catch { return source.url; }
-                                      })()}
-                                    </span>
-                                  </div>
-                                  <span className="text-[12px] font-medium text-foreground/80 truncate group-hover/source:text-foreground transition-colors">{source.title}</span>
-                                </a>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        <ToolVisibility meta={message.toolMeta} memoryFacts={memoryFacts} />
+                        <SourcesPanel sources={message.sources || []} />
                         
                         {/* Message Content */}
                         <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[15px] prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 prose-pre:shadow-none prose-pre:m-0 prose-code:text-primary prose-code:font-normal prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-headings:font-semibold prose-headings:tracking-tight prose-h2:text-[18px] prose-h2:mt-6 prose-h2:mb-4 prose-h3:text-[15px] prose-h3:mt-5 prose-h3:mb-2 prose-ul:my-3 prose-li:my-1 text-foreground/90">
@@ -1035,6 +1221,8 @@ Would you like me to elaborate on any of these points?`;
                     animate="animate"
                     className="group"
                   >
+                    <ToolVisibility meta={streamingMeta || undefined} memoryFacts={memoryFacts} live />
+                    <SourcesPanel sources={streamingMeta?.sources || []} compact />
                     {streamingContent ? (
                       <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[15px] prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 prose-pre:shadow-none prose-pre:m-0 prose-code:text-primary prose-code:font-normal prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-headings:font-semibold prose-headings:tracking-tight prose-h2:text-[18px] prose-h2:mt-6 prose-h2:mb-4 prose-h3:text-[15px] prose-h3:mt-5 prose-h3:mb-2 prose-ul:my-3 prose-li:my-1 text-foreground/90">
                         <ReactMarkdown
@@ -1073,27 +1261,40 @@ Would you like me to elaborate on any of these points?`;
                         </ReactMarkdown>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
                         <div className="size-5 rounded bg-primary/20 flex items-center justify-center border border-primary/30 shadow-[0_0_10px_rgba(var(--primary),0.15)]">
                           <Sparkles className="size-2.5 text-primary" />
                         </div>
                         <div className="flex items-center gap-2">
                           <Loader2 className="size-3.5 animate-spin text-primary" />
-                          <span className="text-[13px] font-medium text-foreground/80">Deep reasoning...</span>
+                          <span className="text-[13px] font-medium text-foreground/80">
+                            {streamStatus?.type === "status" ? streamStatus.message : "Composing response..."}
+                          </span>
                         </div>
                         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.02] border border-white/5 shadow-inner ml-2">
                           <Globe className="size-3 text-muted-foreground animate-pulse" />
-                          <span className="text-[11px] text-muted-foreground font-medium">Searching knowledge base...</span>
+                          <span className="text-[11px] text-muted-foreground font-medium">Checking workspace context</span>
                         </div>
                       </div>
                     )}
                   </motion.div>
                 )}
+                {streamError && !isStreaming && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+                    <span className="flex items-center gap-2">
+                      <AlertCircle className="size-3.5" />
+                      {streamError}
+                    </span>
+                    <Button variant="ghost" size="sm" className="h-7 text-destructive hover:text-destructive" onClick={handleRegenerate}>
+                      Retry
+                    </Button>
+                  </div>
+                )}
                 <div ref={messagesEndRef} className="h-6" />
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Input Area */}
         <div className="shrink-0 p-3 pt-2 sm:p-4 sm:pt-2">
@@ -1105,6 +1306,107 @@ Would you like me to elaborate on any of these points?`;
               className="hidden"
               onChange={handleFileSelected}
             />
+
+            <div className="mb-3 flex gap-1 overflow-x-auto rounded-lg border border-white/5 bg-white/[0.02] p-1 md:hidden">
+              {workspaceModes.map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-colors ${
+                    selectedMode === mode.id
+                      ? "bg-primary/15 text-foreground"
+                      : "text-muted-foreground/65"
+                  }`}
+                  onClick={() => setSelectedMode(mode.id)}
+                >
+                  <mode.icon className="size-3.5" />
+                  {mode.name}
+                </button>
+              ))}
+            </div>
+
+            {memories.length > 0 && (
+              <div className="mb-3 flex items-center gap-1.5 overflow-x-auto px-1">
+                <Brain className="size-3.5 shrink-0 text-primary" />
+                {memories.slice(0, 4).map((memory) => (
+                  <MemoryChip
+                    key={memory.id}
+                    label={memory.content}
+                    onDelete={() => removeMemory(memory.id)}
+                  />
+                ))}
+              </div>
+            )}
+
+            <div
+              className={`mb-3 rounded-xl border border-dashed px-3 py-3 transition-all ${
+                isDraggingFile
+                  ? "border-primary/50 bg-primary/10"
+                  : "border-white/10 bg-white/[0.015]"
+              }`}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setIsDraggingFile(true);
+              }}
+              onDragLeave={() => setIsDraggingFile(false)}
+              onDrop={handleDrop}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  type="button"
+                  className="flex min-w-0 items-center gap-3 text-left"
+                  onClick={handleAttachmentClick}
+                  disabled={uploadStatus === "uploading"}
+                >
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-[#050505]">
+                    {uploadStatus === "uploading" ? (
+                      <Loader2 className="size-4 animate-spin text-primary" />
+                    ) : (
+                      <UploadCloud className="size-4 text-primary" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-medium text-foreground/85">
+                      Drop PDFs to add workspace knowledge
+                    </p>
+                    <p className="truncate text-[11px] text-muted-foreground/55">
+                      {documents.length > 0
+                        ? `${documents.length} document${documents.length === 1 ? "" : "s"} indexed`
+                        : "Authenticated uploads are indexed for retrieval"}
+                    </p>
+                  </div>
+                </button>
+                <div className="flex flex-wrap gap-1.5">
+                  {collections.length > 0 && (
+                    <select
+                      className="h-6 rounded-full border border-white/10 bg-[#050505] px-2 text-[10px] text-muted-foreground outline-none"
+                      value={activeCollectionId || ""}
+                      onChange={(event) => setActiveCollectionId(Number(event.target.value))}
+                      aria-label="Document collection"
+                    >
+                      {collections.map((collection) => (
+                        <option key={collection.id} value={collection.id}>
+                          {collection.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {documents.slice(0, 3).map((document) => (
+                    <DocumentChip
+                      key={document.filename}
+                      document={document}
+                      deleting={deletingDocument === document.filename}
+                      onDelete={() => handleDeleteDocument(document.filename)}
+                    />
+                  ))}
+                  {documents.length > 3 && (
+                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-muted-foreground">
+                      +{documents.length - 3}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
 
             {(attachedFile || uploadMessage) && (
               <div className="mb-2 space-y-1 px-1">
@@ -1146,13 +1448,27 @@ Would you like me to elaborate on any of these points?`;
                 <textarea
                   ref={inputRef}
                   placeholder="Message Omni AI..."
-                  className="w-full min-h-[56px] max-h-[32dvh] resize-none bg-transparent px-4 py-4 pr-28 text-[15px] placeholder:text-muted-foreground/40 focus:outline-none leading-relaxed sm:px-5 sm:pr-32"
+                  className="w-full min-h-[56px] max-h-[32dvh] resize-none bg-transparent px-4 py-4 pr-40 text-[15px] placeholder:text-muted-foreground/40 focus:outline-none leading-relaxed sm:px-5"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   rows={1}
                 />
                 <div className="absolute bottom-3 right-3 flex items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
+                        onClick={() => input.trim() && addMemory(input.trim())}
+                        disabled={!input.trim()}
+                      >
+                        <Brain className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Remember</TooltipContent>
+                  </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button 
@@ -1198,6 +1514,251 @@ Would you like me to elaborate on any of these points?`;
         </div>
       </div>
     </div>
+  );
+}
+
+function ToolVisibility({
+  meta,
+  memoryFacts,
+  live = false,
+}: {
+  meta?: StreamMeta | null;
+  memoryFacts: string[];
+  live?: boolean;
+}) {
+  const tool = meta?.tool || "rag";
+  const toolLabel =
+    tool === "calculator" || meta?.route?.tools?.includes("calculator")
+      ? "Calculator"
+      : meta?.route?.tools?.includes("web_search")
+        ? meta?.route?.tools?.includes("vector_retrieval")
+          ? "Web + documents"
+          : "Web search"
+        : tool === "web_search"
+          ? "Web search"
+          : "Document search";
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
+        {live ? <Loader2 className="size-3.5 animate-spin text-primary" /> : <Wrench className="size-3.5 text-primary" />}
+        <span>{live ? "Using" : "Used"} {toolLabel}</span>
+      </div>
+      {meta?.strategy && (
+        <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
+          <Database className="size-3.5 text-blue-400" />
+          <span>{meta.strategy}</span>
+        </div>
+      )}
+      {meta?.route?.status && (
+        <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
+          <Search className="size-3.5 text-cyan-300" />
+          <span>Search {meta.route.status}</span>
+        </div>
+      )}
+      {meta?.mode && (
+        <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
+          <Sparkles className="size-3.5 text-violet-300" />
+          <span>{meta.mode} mode</span>
+        </div>
+      )}
+      <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
+        <ShieldCheck className="size-3.5 text-emerald-300" />
+        <span>
+          Memory {meta?.memory?.conversation_history || memoryFacts.length > 0 ? "available" : "ready"}
+        </span>
+      </div>
+      {memoryFacts.slice(0, 2).map((fact) => (
+        <span
+          key={fact}
+          className="rounded-full border border-primary/15 bg-primary/5 px-2.5 py-1 text-[10px] font-medium text-primary/90"
+        >
+          {fact}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function SourcesPanel({
+  sources,
+  compact = false,
+}: {
+  sources: SourceCitation[];
+  compact?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (sources.length === 0) return null;
+
+  const webSources = sources.filter((source) => source.type === "web");
+  const memorySources = sources.filter((source) => source.type === "memory");
+  const documentSources = sources.filter((source) => source.type !== "web" && source.type !== "memory");
+
+  return (
+    <div className={compact ? "mb-4" : "mb-6"}>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/60">
+          <BookOpen className="size-3" />
+          Sources used
+          {webSources.length > 0 && (
+            <span className="rounded-full bg-cyan-400/10 px-1.5 py-0.5 text-[9px] text-cyan-200">
+              {webSources.length} web
+            </span>
+          )}
+          {documentSources.length > 0 && (
+            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] text-primary">
+              {documentSources.length} docs
+            </span>
+          )}
+          {memorySources.length > 0 && (
+            <span className="rounded-full bg-emerald-400/10 px-1.5 py-0.5 text-[9px] text-emerald-200">
+              {memorySources.length} memory
+            </span>
+          )}
+        </p>
+        <button
+          type="button"
+          className="text-[11px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Hide chunks" : "View chunks"}
+        </button>
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-thin">
+        {sources.map((source, index) => (
+          <SourceCard key={`${source.source}-${index}`} source={source} index={index} />
+        ))}
+      </div>
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="mt-2 space-y-2">
+              {[
+                { label: "Workspace documents", items: documentSources },
+                { label: "Live web", items: webSources },
+                { label: "Memory", items: memorySources },
+              ].map((group) => group.items.length > 0 && (
+                <div key={group.label} className="space-y-2">
+                  <p className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/45">
+                    {group.label}
+                  </p>
+                  {group.items.map((source, index) => (
+                    <div
+                      key={`${source.source}-chunk-${index}`}
+                      className="rounded-xl border border-white/5 bg-[#050505] p-3 shadow-inner"
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-3 text-[10px] text-muted-foreground/55">
+                        <span className="truncate font-medium">{source.title || source.source}</span>
+                        {typeof source.score === "number" && <span>{Math.round(source.score * 100)}% match</span>}
+                      </div>
+                      <p className="line-clamp-5 text-[12px] leading-relaxed text-muted-foreground/80">
+                        {source.chunk}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function SourceCard({
+  source,
+  index,
+}: {
+  source: SourceCitation;
+  index: number;
+}) {
+  const body = (
+    <div className="group/source flex w-[190px] shrink-0 flex-col justify-between gap-2 rounded-xl border border-white/5 bg-[#050505] px-3 py-2.5 shadow-inner transition-colors hover:bg-white/[0.03]">
+      <div className="flex items-center gap-2">
+        <div className="flex size-5 shrink-0 items-center justify-center rounded-md bg-white/10">
+          {source.type === "web" ? (
+            <Globe className="size-3 text-cyan-200 transition-colors group-hover/source:text-foreground" />
+          ) : source.type === "memory" ? (
+            <Brain className="size-3 text-emerald-200 transition-colors group-hover/source:text-foreground" />
+          ) : (
+            <FileText className="size-3 text-primary transition-colors group-hover/source:text-foreground" />
+          )}
+        </div>
+        <span className="truncate text-[10px] text-muted-foreground/60">
+          {source.source || source.title || `Source ${index + 1}`}
+        </span>
+      </div>
+      <span className="line-clamp-2 text-[12px] font-medium leading-snug text-foreground/85 transition-colors group-hover/source:text-foreground">
+        {source.title || source.source || `Retrieved chunk ${index + 1}`}
+      </span>
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground/45">
+        <span>{source.type === "web" ? "live web" : source.type === "memory" ? "memory" : source.strategy || "retrieval"}</span>
+        {typeof source.score === "number" && <span>{Math.round(source.score * 100)}%</span>}
+      </div>
+    </div>
+  );
+
+  if (!source.url) return body;
+
+  return (
+    <a href={source.url} target="_blank" rel="noopener noreferrer">
+      {body}
+    </a>
+  );
+}
+
+function DocumentChip({
+  document,
+  deleting,
+  onDelete,
+}: {
+  document: DocumentRecord;
+  deleting: boolean;
+  onDelete: () => void;
+}) {
+  return (
+    <span className="group inline-flex max-w-[180px] items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-muted-foreground">
+      <FileIcon className="size-3 shrink-0 text-blue-300" />
+      <span className="truncate">{document.filename}</span>
+      <button
+        type="button"
+        className="ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-white/10 hover:text-foreground"
+        onClick={onDelete}
+        aria-label={`Remove ${document.filename}`}
+        disabled={deleting}
+      >
+        {deleting ? <Loader2 className="size-2.5 animate-spin" /> : <X className="size-2.5" />}
+      </button>
+    </span>
+  );
+}
+
+function MemoryChip({
+  label,
+  onDelete,
+}: {
+  label: string;
+  onDelete: () => void;
+}) {
+  return (
+    <span className="group inline-flex max-w-[190px] items-center gap-1.5 rounded-full border border-primary/15 bg-primary/5 px-2 py-1 text-[10px] text-primary/90">
+      <span className="truncate">{label}</span>
+      <button
+        type="button"
+        className="ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-white/10 hover:text-foreground"
+        onClick={onDelete}
+        aria-label="Delete memory"
+      >
+        <X className="size-2.5" />
+      </button>
+    </span>
   );
 }
 

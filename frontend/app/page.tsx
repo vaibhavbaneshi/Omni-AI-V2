@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { 
   Sparkles, 
   Brain, 
@@ -15,12 +16,16 @@ import {
   Lock,
   Terminal,
   LayoutDashboard,
+  ChevronDown,
+  LogOut,
+  Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { getInitials, useSession } from "@/lib/auth";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { clearSession, getInitials, useSession } from "@/lib/auth";
 
 // Premium motion easing
 const premiumEasing = [0.16, 1, 0.3, 1] as const;
@@ -39,8 +44,14 @@ const staggerContainer = {
 };
 
 export default function LandingPage() {
+  const router = useRouter();
   const { session, ready, authenticated } = useSession();
   const initials = getInitials(session?.name);
+
+  const handleLogout = () => {
+    clearSession();
+    router.replace("/login");
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden selection:bg-primary/30">
@@ -91,11 +102,39 @@ export default function LandingPage() {
                   <Button size="sm" className="shadow-[0_0_20px_rgba(var(--primary),0.2)]" asChild>
                     <Link href="/chat">Workspace</Link>
                   </Button>
-                  <Avatar className="size-8 ring-1 ring-white/10">
-                    <AvatarFallback className="bg-primary/15 text-xs text-primary">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button type="button" className="flex items-center gap-2 rounded-full ring-1 ring-white/10 px-1.5 py-1 transition hover:ring-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/50">
+                        <Avatar className="size-8">
+                          <AvatarFallback className="bg-primary/15 text-xs text-primary">
+                            {initials}
+                          </AvatarFallback>
+                        </Avatar>
+                        <ChevronDown className="size-4 text-muted-foreground" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem asChild>
+                          <Link href="/dashboard">
+                            <LayoutDashboard data-icon="inline-start" />
+                            Dashboard
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem asChild>
+                          <Link href="/settings">
+                            <Settings data-icon="inline-start" />
+                            Settings
+                          </Link>
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+                        <LogOut data-icon="inline-start" />
+                        Sign Out
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </>
               ) : ready ? (
                 <>

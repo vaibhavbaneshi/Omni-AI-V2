@@ -25,7 +25,11 @@ export default function LoginPage() {
   useEffect(() => {
     const oauthError = new URLSearchParams(window.location.search).get("error");
     if (oauthError) {
-      setError(oauthError);
+      const id = window.setTimeout(() => {
+        setError(oauthError);
+      }, 0);
+
+      return () => window.clearTimeout(id);
     }
   }, []);
 

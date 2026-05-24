@@ -14,6 +14,10 @@ class Settings:
 
     COLLECTION_NAME = os.getenv("COLLECTION_NAME", "omni_ai")
 
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+    SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+    WEB_SEARCH_PROVIDER = os.getenv("WEB_SEARCH_PROVIDER", "tavily")
+
     POSTGRES_HOST = os.getenv(
         "POSTGRES_HOST",
         "localhost"

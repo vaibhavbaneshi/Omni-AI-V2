@@ -10,11 +10,13 @@ def save_message(
     db: Session,
     session_id: int,
     role: str,
-    content: str
+    content: str,
+    user_id: int | None = None
 ):
 
     message = Message(
         session_id=session_id,
+        user_id=user_id,
         role=role,
         content=content
     )

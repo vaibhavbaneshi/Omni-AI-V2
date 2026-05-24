@@ -1,28 +1,26 @@
+from datetime import datetime
+
 from sqlalchemy import (
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
-    String
+    String,
+    Text
 )
-
-from datetime import datetime
 
 from app.db.database import Base
 
-class ChatSession(Base):
 
-    __tablename__ = "chat_sessions"
+class UserMemory(Base):
+
+    __tablename__ = "user_memories"
 
     id = Column(
         Integer,
         primary_key=True,
         index=True
-    )
-
-    title = Column(
-        String,
-        nullable=False
     )
 
     user_id = Column(
@@ -39,7 +37,30 @@ class ChatSession(Base):
         index=True
     )
 
+    category = Column(
+        String,
+        nullable=False,
+        default="preference"
+    )
+
+    content = Column(
+        Text,
+        nullable=False
+    )
+
+    importance = Column(
+        Float,
+        nullable=False,
+        default=0.5
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow
+    )
+
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
     )
