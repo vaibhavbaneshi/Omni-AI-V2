@@ -2,60 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Sparkles, Mail, Lock, User, ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Sparkles } from "lucide-react";
 import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
-import { createSession, useAuthRedirect } from "@/lib/auth";
-import { ApiError, loginWithCredentials, registerAccount } from "@/lib/api";
+import { useAuthRedirect } from "@/lib/auth";
 import { fadeUpVariant } from "@/lib/motion";
 
 export default function RegisterPage() {
-  const router = useRouter();
   const { redirect } = useAuthRedirect("/dashboard");
-  const [isLoading, setIsLoading] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError(null);
-
-    const normalizedEmail = email.trim();
-    const username = normalizedEmail;
-
-    try {
-      await registerAccount({
-        username,
-        email: normalizedEmail,
-        password,
-      });
-
-      const auth = await loginWithCredentials(normalizedEmail, password);
-      createSession({
-        name,
-        email: normalizedEmail,
-        username,
-        token: auth.access_token,
-      });
-      router.replace(redirect);
-    } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : "Unable to create your account. Please try again.";
-      setError(message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-dvh flex items-center justify-center p-4 py-8 relative overflow-x-hidden bg-[#050505]">
@@ -97,100 +52,9 @@ export default function RegisterPage() {
 
           <SocialAuthButtons
             nextPath={redirect}
-            disabled={isLoading}
             onError={setError}
             onClearError={() => setError(null)}
           />
-
-          <div className="relative mb-6">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-white/5" />
-            </div>
-            <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
-              <span className="bg-[#0A0A0A] px-2 text-muted-foreground/50">
-                Or continue with email
-              </span>
-            </div>
-          </div>
-
-          {/* Register Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name" className="text-[12px] text-muted-foreground/80">Full Name</Label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/50" />
-                <Input 
-                  id="name"
-                  type="text" 
-                  placeholder="John Doe"
-                  className="pl-9 h-10 bg-white/[0.02] border-white/5 focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/30 text-[13px] placeholder:text-muted-foreground/30 shadow-inner transition-all"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="email" className="text-[12px] text-muted-foreground/80">Email</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/50" />
-                <Input 
-                  id="email"
-                  type="email" 
-                  placeholder="you@example.com"
-                  className="pl-9 h-10 bg-white/[0.02] border-white/5 focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/30 text-[13px] placeholder:text-muted-foreground/30 shadow-inner transition-all"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-[12px] text-muted-foreground/80">Password</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/50" />
-                <Input 
-                  id="password"
-                  type="password" 
-                  placeholder="••••••••"
-                  className="pl-9 h-10 bg-white/[0.02] border-white/5 focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/30 text-[13px] placeholder:text-muted-foreground/30 shadow-inner transition-all"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  disabled={isLoading}
-                  minLength={8}
-                />
-              </div>
-            </div>
-
-            <div className="flex items-start gap-2 pt-1 pb-2">
-              <Checkbox id="terms" required className="mt-0.5 border-white/10 data-[state=checked]:bg-primary" />
-              <Label htmlFor="terms" className="text-[12px] text-muted-foreground/70 font-normal cursor-pointer leading-snug">
-                I agree to the{" "}
-                <Link href="/terms" className="text-primary/80 hover:text-primary hover:underline transition-colors">Terms of Service</Link>
-                {" "}and{" "}
-                <Link href="/privacy" className="text-primary/80 hover:text-primary hover:underline transition-colors">Privacy Policy</Link>
-              </Label>
-            </div>
-
-            <Button type="submit" className="w-full h-10 bg-primary text-primary-foreground hover:bg-primary/90 glow-primary transition-all text-[13px] font-medium" disabled={isLoading}>
-              {isLoading ? (
-                <span className="flex items-center gap-2">
-                  <span className="size-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                  Creating account...
-                </span>
-              ) : (
-                <span className="flex items-center justify-center gap-2 w-full">
-                  Create Account
-                  <ArrowRight className="size-4" />
-                </span>
-              )}
-            </Button>
-          </form>
 
           <p className="mt-6 text-center text-[12px] text-muted-foreground/60">
             Already have an account?{" "}

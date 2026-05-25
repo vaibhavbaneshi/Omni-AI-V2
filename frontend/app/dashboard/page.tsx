@@ -177,7 +177,7 @@ export default function DashboardPage() {
 
   const handleLogout = () => {
     clearSession();
-    router.replace("/login");
+    router.replace("/");
   };
 
   return (

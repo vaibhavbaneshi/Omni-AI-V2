@@ -50,7 +50,7 @@ export default function LandingPage() {
 
   const handleLogout = () => {
     clearSession();
-    router.replace("/login");
+    router.replace("/");
   };
 
   return (

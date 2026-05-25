@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.core.telemetry import traced_span
 from app.agent.context import ContextAggregator
 from app.agent.schemas import AgentRoute, ContextBundle, TraceEvent
 from app.agent.tools import ToolRegistry
@@ -148,10 +149,8 @@ class AgentOrchestrator:
             )
         ]
 
-        route = self.plan(
-            query=query,
-            mode=mode
-        )
+        with traced_span("orchestration.plan", mode=mode):
+            route = self.plan(query=query, mode=mode)
 
         traces.append(
             TraceEvent(
@@ -174,17 +173,18 @@ class AgentOrchestrator:
                 )
             )
 
-            result = self.registry.execute(
-                tool_name,
-                query=query,
-                user_id=user_id,
-                db=db,
-                mode=mode,
-                workspace_id=workspace_id,
-                collection_id=collection_id,
-                session_id=session_id,
-                history=history
-            )
+            with traced_span("orchestration.tool", tool=tool_name, user_id=user_id):
+                result = self.registry.execute(
+                    tool_name,
+                    query=query,
+                    user_id=user_id,
+                    db=db,
+                    mode=mode,
+                    workspace_id=workspace_id,
+                    collection_id=collection_id,
+                    session_id=session_id,
+                    history=history,
+                )
 
             results.append(result)
             traces.extend(result.traces)

@@ -65,6 +65,7 @@ import {
   type StreamSource,
 } from "@/lib/api";
 import { useChatStream } from "@/hooks/useChatStream";
+import { isBackendSessionId } from "@/lib/chat-sessions";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useMemory } from "@/hooks/useMemory";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -155,7 +156,7 @@ const workspaceModes = [
 
 const initialChats: Chat[] = [
   {
-    id: "1",
+    id: "local-1",
     title: "React Performance Optimization",
     lastMessage: "How do I optimize this component?",
     timestamp: new Date(Date.now() - 1000 * 60 * 30),
@@ -231,7 +232,7 @@ Would you like me to show you specific examples for your component?`,
     ],
   },
   {
-    id: "2",
+    id: "local-2",
     title: "Python Data Analysis",
     lastMessage: "Can you help with pandas?",
     timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2),
@@ -239,7 +240,7 @@ Would you like me to show you specific examples for your component?`,
     messages: [],
   },
   {
-    id: "3",
+    id: "local-3",
     title: "API Design Best Practices",
     lastMessage: "RESTful vs GraphQL comparison",
     timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24),
@@ -247,7 +248,7 @@ Would you like me to show you specific examples for your component?`,
     messages: [],
   },
   {
-    id: "4",
+    id: "local-4",
     title: "Machine Learning Basics",
     lastMessage: "What is gradient descent?",
     timestamp: new Date(Date.now() - 1000 * 60 * 60 * 48),
@@ -366,9 +367,9 @@ export default function ChatPage() {
   }, [authenticated, session?.token]);
 
   useEffect(() => {
-    const numericId = Number(activeChat?.id);
+    const numericId = isBackendSessionId(activeChat?.id) ? Number(activeChat.id) : null;
 
-    if (!session?.token || !activeChat || Number.isNaN(numericId)) return;
+    if (!session?.token || !activeChat || numericId === null) return;
     if (activeChat.messages.length > 0) return;
 
     getChatSessionMessages(numericId, session.token)
@@ -407,7 +408,7 @@ export default function ChatPage() {
     let chatForRequest = options?.chatOverride || activeChat;
 
     try {
-      if (!chatForRequest || Number.isNaN(Number(chatForRequest.id))) {
+      if (!chatForRequest || !isBackendSessionId(chatForRequest.id)) {
         const created = await createChatSession(currentInput.slice(0, 80) || "New Chat", session?.token);
         const createdChat: Chat = {
           id: String(created.id),
@@ -460,10 +461,18 @@ export default function ChatPage() {
       setActiveChat(completedChat);
       setChats((prev) => prev.map((c) => (c.id === completedChat.id ? completedChat : c)));
     } catch (error) {
+      const isAuthFailure = error instanceof ApiError && error.status === 401;
       const message =
         error instanceof ApiError
           ? error.message
           : "The response stream failed. Check the backend and try again.";
+
+      if (isAuthFailure) {
+        clearSession();
+        window.location.assign(
+          `/login?error=${encodeURIComponent("Your session expired. Please sign in again.")}`
+        );
+      }
 
       setStreamError(message);
 
@@ -490,7 +499,7 @@ export default function ChatPage() {
 
   const handleNewChat = () => {
     const newChat: Chat = {
-      id: Date.now().toString(),
+      id: `local-${Date.now()}`,
       title: "New Chat",
       lastMessage: "",
       timestamp: new Date(),
@@ -608,7 +617,7 @@ export default function ChatPage() {
 
   const handleLogout = () => {
     clearSession();
-    window.location.assign("/login");
+    window.location.assign("/");
   };
 
   const handleAttachmentClick = () => {

@@ -19,6 +19,7 @@ from app.models.document import (
 )
 
 from app.models.memory import UserMemory
+from app.models.conversation_summary import ConversationSummary
 
 def init_db():
 

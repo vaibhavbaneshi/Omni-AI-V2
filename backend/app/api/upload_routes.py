@@ -16,6 +16,8 @@ from app.services.documents_services import (
 from app.core.security import (
     get_current_user
 )
+from app.core.app_settings import get_settings
+from app.core.upload_validation import validate_pdf_upload
 from app.db.session import get_db
 from app.models.document import DocumentCollection, DocumentRecord
 from app.models.user import User
@@ -36,18 +38,7 @@ async def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="No file provided"
-        )
-
-    extension = os.path.splitext(file.filename)[1].lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF uploads are supported"
-        )
+    await validate_pdf_upload(file, max_bytes=get_settings().MAX_UPLOAD_BYTES)
 
     collection_record = None
 

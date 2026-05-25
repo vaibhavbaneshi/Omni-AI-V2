@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
+import { clearSession } from "@/lib/auth";
 import {
+  ApiError,
   streamChat,
   type ChatStreamEvent,
   type StreamMeta,
@@ -76,9 +78,29 @@ export function useChatStream() {
         sources: sourcesRef.current,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The response stream failed.";
-      setStreamError(message);
-      throw error;
+        // Log detailed error for debugging
+        // ApiError carries `status` and optional `statusText`
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const errAny: any = error;
+        if (errAny?.status) {
+          console.error("streamChat error:", errAny.status, errAny.statusText, errAny.message || errAny);
+        } else {
+          console.error("streamChat error:", error);
+        }
+
+        const message =
+          error instanceof ApiError && error.status === 401
+            ? "Session expired or invalid. Please sign in again."
+            : error instanceof Error
+            ? error.message
+            : "The response stream failed.";
+
+        if (error instanceof ApiError && error.status === 401) {
+          clearSession();
+        }
+
+        setStreamError(message);
+        throw error;
     } finally {
       setIsStreaming(false);
       setStreamingContent("");

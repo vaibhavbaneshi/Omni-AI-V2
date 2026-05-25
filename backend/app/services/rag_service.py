@@ -1,15 +1,20 @@
 import chromadb
 import requests
+import logging
 
 from sentence_transformers import (
     SentenceTransformer
 )
 
 from app.core.config import settings
+from app.core.ollama import raise_ollama_http_error, resolve_ollama_model_name
+from app.services.prompt_builder import build_stream_prompt
 
 from app.services.reranker_service import (
     rerank_documents
 )
+
+logger = logging.getLogger(__name__)
 
 from app.services.conversation_service import (
     get_chat_history
@@ -47,20 +52,37 @@ from app.services.hybrid_search import (
     semantic_search_with_metadata
 )
 
+from app.core.sanitize import sanitize_retrieved_context
+from app.core.telemetry import traced_span
+from app.services.retrieval_cache import (
+    cache_retrieval_result,
+    get_retrieval_cache,
+)
+
+
 def retrieve_context(
     query: str,
     user_id=None,
     workspace_id="default",
     collection_id=None
 ):
-
-    chunks = hybrid_search(
+    cached = get_retrieval_cache(
         query=query,
-        top_k=10,
         user_id=user_id,
         workspace_id=workspace_id,
-        collection_id=collection_id
+        collection_id=collection_id,
     )
+    if cached is not None:
+        return cached
+
+    with traced_span("retrieval.hybrid", user_id=user_id, workspace_id=workspace_id):
+        chunks = hybrid_search(
+            query=query,
+            top_k=10,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            collection_id=collection_id,
+        )
 
     if not chunks:
         return ""
@@ -71,10 +93,14 @@ def retrieve_context(
         top_k=3
     )
 
-    context = "\n\n".join(
-        reranked_chunks
+    context = sanitize_retrieved_context(reranked_chunks)
+    cache_retrieval_result(
+        query=query,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id,
+        value=context,
     )
-
     return context
 
 
@@ -141,30 +167,49 @@ def generate_response(
     context: str
 ):
 
-    prompt = f"""
-You are an AI assistant.
-
-Answer ONLY using the provided context.
-
-Context:
-{context}
-
-Question:
-{query}
-"""
-
-    response = requests.post(
-        settings.OLLAMA_URL,
-        json={
-            "model": settings.MODEL_NAME,
-            "prompt": prompt,
-            "stream": False
-        }
+    prompt = build_stream_prompt(
+        query=query,
+        context=context or "",
+        history="",
+        summary="",
+        mode="research",
     )
+
+    ollama_url = settings.OLLAMA_URL
+    if not ollama_url:
+        raise RuntimeError(
+            "OLLAMA_URL is not configured. Set OLLAMA_URL to your Ollama base URL "
+            "(e.g. http://localhost:11434) or full generate URL."
+        )
+
+    model = resolve_ollama_model_name(settings.MODEL_NAME, ollama_url)
+
+    try:
+        response = requests.post(
+            ollama_url,
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.35,
+                },
+            },
+            timeout=120
+        )
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise_ollama_http_error(exc, generate_url=ollama_url, model=model)
+    except requests.RequestException as exc:
+        logger.exception("Error contacting model server at %s", ollama_url)
+        raise RuntimeError(
+            f"Failed to contact model server at {ollama_url}: {exc}. "
+            "Ensure Ollama is running (`ollama serve`)."
+        ) from exc
 
     data = response.json()
 
-    return data["response"]
+    return data.get("response", "")
 
 # -----------------------------------
 # COMPLETE RAG PIPELINE
@@ -195,106 +240,60 @@ def stream_response(
     history="",
     summary="",
     mode="research",
-    route=None
+    route=None,
 ):
+    # Route metadata is exposed to the UI via stream meta events, not in the model prompt.
+    _ = route
 
-    mode_prompts = {
-        "research": """
-Use a research-focused style:
-- lead with a direct answer
-- organize into clear sections
-- cite sources inline when source labels are present
-- call out uncertainty and source limitations
-""",
-        "coding": """
-Use a coding-focused style:
-- prioritize implementation details
-- include concise code examples when useful
-- explain tradeoffs and edge cases
-- keep prose tight
-""",
-        "writing": """
-Use a writing-focused style:
-- improve clarity, structure, and tone
-- preserve the user's intent
-- offer polished wording and alternatives when useful
-""",
-        "analyst": """
-Use an analyst-focused style:
-- structure findings, evidence, and implications
-- compare options where relevant
-- include assumptions and risks
-"""
-    }
-
-    mode_instruction = mode_prompts.get(
-        mode,
-        mode_prompts["research"]
+    prompt = build_stream_prompt(
+        query=query,
+        context=context or "",
+        history=history or "",
+        summary=summary or "",
+        mode=mode or "research",
     )
 
-    route_summary = ""
+    ollama_url = settings.OLLAMA_URL
+    if not ollama_url:
+        raise RuntimeError(
+            "OLLAMA_URL is not configured. Set OLLAMA_URL to your Ollama base URL "
+            "(e.g. http://localhost:11434) or full generate URL."
+        )
 
-    if route:
-        route_summary = f"""
-ROUTING PLAN:
-Strategy: {route.get("strategy", "unknown")}
-Tools used: {", ".join(route.get("tools", []))}
-Status: {route.get("status", "ready")}
-"""
+    model = resolve_ollama_model_name(settings.MODEL_NAME, ollama_url)
 
-    prompt = f"""
-You are an AI assistant.
-
-Use:
-1. Conversation history
-2. Retrieved context
-
-to answer accurately.
-
-Do not reveal hidden reasoning or private chain-of-thought.
-You may briefly mention high-level tool usage and evidence quality.
-
-{mode_instruction}
-
------------------------------------
-CONVERSATION HISTORY:
-{history}
-
------------------------------------
-CONVERSATION SUMMARY:
-{summary}
-
------------------------------------
-{route_summary}
-
------------------------------------
-RETRIEVED CONTEXT:
-{context}
-
------------------------------------
-QUESTION:
-{query}
-"""
-
-    response = requests.post(
-        settings.OLLAMA_URL,
-        json={
-            "model": settings.MODEL_NAME,
-            "prompt": prompt,
-            "stream": True
-        },
-        stream=True
-    )
+    try:
+        response = requests.post(
+            ollama_url,
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": True,
+                "options": {
+                    "temperature": 0.35,
+                },
+            },
+            stream=True,
+            timeout=120
+        )
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise_ollama_http_error(exc, generate_url=ollama_url, model=model)
+    except requests.RequestException as exc:
+        logger.exception("Error contacting model server at %s", ollama_url)
+        raise RuntimeError(
+            f"Failed to contact model server at {ollama_url}: {exc}. "
+            "Ensure Ollama is running (`ollama serve`)."
+        ) from exc
 
     for line in response.iter_lines():
-
         if line:
+            try:
+                data = json.loads(line)
+            except Exception:
+                # ignore malformed lines but log them
+                logger.exception("Failed to parse line from model stream")
+                continue
 
-            data = json.loads(line)
-
-            token = data.get(
-                "response",
-                ""
-            )
-
+            token = data.get("response", "")
             yield token

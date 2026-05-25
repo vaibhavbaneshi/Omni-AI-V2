@@ -1,0 +1,28 @@
+[
+  {
+    "id": "rag-001",
+    "question": "What is the refund policy for annual subscriptions?",
+    "ground_truth": "Annual subscriptions can be refunded within 14 days.",
+    "contexts": [
+      "Annual subscriptions can be refunded within 14 days of purchase.",
+      "Monthly plans are non-refundable after billing."
+    ],
+    "expected_tools": ["retrieval"]
+  },
+  {
+    "id": "orch-001",
+    "question": "What is 15 percent of 240?",
+    "ground_truth": "36",
+    "contexts": [],
+    "expected_tools": ["calculator"]
+  },
+  {
+    "id": "rag-002",
+    "question": "Summarize the onboarding checklist for enterprise tenants.",
+    "ground_truth": "Enterprise onboarding includes SSO setup, workspace provisioning, and admin training.",
+    "contexts": [
+      "Enterprise onboarding checklist: configure SSO, create workspace, assign admins, schedule training."
+    ],
+    "expected_tools": ["retrieval", "summarizer"]
+  }
+]

@@ -1,0 +1,14 @@
+# Database migrations
+
+Omni-AI uses Alembic for schema versioning.
+
+## Commands
+
+```bash
+cd backend
+alembic upgrade head
+alembic downgrade -1
+alembic revision --autogenerate -m "describe change"
+```
+
+`create_all()` in `app/db/init_db.py` remains for local bootstrap, but production should run `alembic upgrade head` on deploy.

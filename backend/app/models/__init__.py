@@ -21,6 +21,7 @@ from app.db.database import (
 from app.models.user import User
 from app.models.chat_session import ChatSession
 from app.models.message import Message
+from app.models.conversation_summary import ConversationSummary
 
 def init_db():
 

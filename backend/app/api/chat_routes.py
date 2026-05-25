@@ -47,6 +47,8 @@ from app.services.summary_service import (
 from app.core.security import (
     get_current_user
 )
+from app.core.app_settings import get_settings
+from app.core.sanitize import sanitize_user_query
 from app.models.user import User
 from app.models.chat_session import ChatSession
 
@@ -115,6 +117,7 @@ def chat_stream(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    query = sanitize_user_query(query, max_length=get_settings().MAX_QUERY_CHARS)
     session = (
         db.query(ChatSession)
         .filter(
@@ -221,37 +224,43 @@ def chat_stream(
             }
         ) + "\n"
 
-        generator = stream_response(
-            query=query,
-            context=context,
-            history=history,
-            summary=summary,
-            mode=workspace_mode,
-            route=route
-        )
+        try:
+            generator = stream_response(
+                query=query,
+                context=context,
+                history=history,
+                summary=summary,
+                mode=workspace_mode,
+                route=route
+            )
 
-        for token in generator:
+            for token in generator:
+                complete_response += token
 
-            complete_response += token
-
+                yield json.dumps(
+                    {
+                        "type": "token",
+                        "content": token
+                    }
+                ) + "\n"
+        except Exception as exc:
             yield json.dumps(
                 {
-                    "type": "token",
-                    "content": token
+                    "type": "error",
+                    "message": str(exc)
                 }
             ) + "\n"
+            yield json.dumps({"type": "done"}) + "\n"
+            return
 
-        # -----------------------------------
-        # SAVE ASSISTANT RESPONSE
-        # -----------------------------------
-
-        save_message(
-            db=db,
-            session_id=session_id,
-            role="assistant",
-            content=complete_response,
-            user_id=current_user.id
-        )
+        if complete_response:
+            save_message(
+                db=db,
+                session_id=session_id,
+                role="assistant",
+                content=complete_response,
+                user_id=current_user.id
+            )
 
         yield json.dumps(
             {

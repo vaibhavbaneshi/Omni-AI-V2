@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
 
 from app.agent.orchestrator import AgentOrchestrator
+from app.core.app_settings import get_settings
+from app.services.research_workflow import run_deep_research
 
 
 orchestrator = AgentOrchestrator()
@@ -16,6 +18,19 @@ def tool_calling_agent(
     session_id: int | None = None,
     history: str = ""
 ):
+    settings = get_settings()
+    deep_research_requested = (
+        mode in {"deep-research", "analyst"}
+        or "deep research" in query.lower()
+    )
+    if settings.ENABLE_DEEP_RESEARCH and deep_research_requested:
+        return run_deep_research(
+            query=query,
+            user_id=user_id,
+            db=db,
+            workspace_id=workspace_id,
+            collection_id=collection_id,
+        )
 
     bundle = orchestrator.run(
         query=query,

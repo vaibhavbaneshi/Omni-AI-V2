@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+      - name: Run unit tests
+        env:
+          ENVIRONMENT: development
+          JWT_SECRET_KEY: ci-test-secret-key-with-32-characters-min
+        run: pytest -q
+
+  backend-lint-import:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate app imports
+        run: |
+          pip install -r requirements.txt
+          python -c "from app.main import app; print(app.title)"
+
+  eval-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run heuristic RAG eval smoke
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          python ../eval/rag_eval.py --dataset ../eval/benchmark_dataset.json --output ../eval/reports
+      - name: Run orchestration eval smoke
+        working-directory: backend
+        run: python ../eval/orchestration_eval.py --dataset ../eval/benchmark_dataset.json --output ../eval/reports

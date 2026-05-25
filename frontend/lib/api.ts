@@ -3,11 +3,13 @@ const API_BASE =
 
 export class ApiError extends Error {
   status: number;
+  statusText?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, statusText?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.statusText = statusText;
   }
 }
 
@@ -53,8 +55,12 @@ export async function apiRequest<T>(
       (typeof body?.detail === "string" && body.detail) ||
       (typeof body?.error === "string" && body.error) ||
       (typeof body?.message === "string" && body.message) ||
-      `Request failed (${response.status})`;
-    throw new ApiError(detail, response.status);
+      `Request failed (${response.status} ${response.statusText})`;
+    const message =
+      response.status === 401
+        ? "Authentication failed. Please sign in again."
+        : detail;
+    throw new ApiError(message, response.status, response.statusText);
   }
 
   if (body && typeof body.error === "string") {
@@ -68,41 +74,6 @@ export type AuthTokenResponse = {
   access_token: string;
   token_type: string;
 };
-
-export async function loginWithCredentials(email: string, password: string) {
-  const body = new URLSearchParams({
-    username: email,
-    password,
-  });
-
-  return apiRequest<AuthTokenResponse>("/login", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: body.toString(),
-  });
-}
-
-export async function registerAccount({
-  username,
-  email,
-  password,
-}: {
-  username: string;
-  email: string;
-  password: string;
-}) {
-  const params = new URLSearchParams({
-    username,
-    email,
-    password,
-  });
-
-  return apiRequest<{ message: string }>(`/register?${params.toString()}`, {
-    method: "POST",
-  });
-}
 
 export type UploadDocumentResponse = {
   message: string;
@@ -306,11 +277,40 @@ export async function streamChat({
   });
 
   if (!response.ok || !response.body) {
-    const body = await parseResponseBody(response);
-    const detail =
-      (typeof body?.detail === "string" && body.detail) ||
-      `Request failed (${response.status})`;
-    throw new ApiError(detail, response.status);
+    const raw = await response.text();
+    let detail = `Request failed (${response.status} ${response.statusText})`;
+
+    if (raw) {
+      for (const line of raw.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line) as { type?: string; message?: string };
+          if (event.type === "error" && event.message) {
+            detail = event.message;
+            break;
+          }
+        } catch {
+          // ignore malformed lines
+        }
+      }
+
+      if (detail.startsWith("Request failed")) {
+        try {
+          const body = JSON.parse(raw) as Record<string, unknown>;
+          if (typeof body.detail === "string") {
+            detail = body.detail;
+          }
+        } catch {
+          // keep default detail
+        }
+      }
+    }
+
+    const message =
+      response.status === 401
+        ? "Authentication failed. Please sign in again."
+        : detail;
+    throw new ApiError(message, response.status, response.statusText);
   }
 
   const reader = response.body.getReader();
