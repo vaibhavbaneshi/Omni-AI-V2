@@ -46,3 +46,12 @@ User message:
         prompt += f"\nAssistant reply preview:\n{preview}\n"
     prompt += "\nTitle:"
     return _generate_title(prompt, fallback=fallback)
+
+
+def should_refine_session_title(
+    session_title: str,
+    *,
+    assistant_message_count: int,
+) -> bool:
+    """Only refine once — after the first assistant reply in a session."""
+    return assistant_message_count == 1

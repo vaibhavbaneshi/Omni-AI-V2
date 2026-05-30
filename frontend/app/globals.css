@@ -209,4 +209,12 @@
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
+
+  .app-safe-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .app-safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
 }

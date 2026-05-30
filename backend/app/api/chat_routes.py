@@ -44,13 +44,14 @@ from app.services.summary_service import (
     summarize_conversation
 )
 
-from app.services.title_service import refine_chat_title
+from app.services.title_service import refine_chat_title, should_refine_session_title
 from app.services.attachment_service import is_document_query
 from app.core.security import get_current_user
 from app.core.app_settings import get_settings
 from app.core.sanitize import sanitize_user_query
 from app.models.user import User
 from app.models.chat_session import ChatSession
+from app.models.message import Message
 
 router = APIRouter()
 
@@ -106,6 +107,13 @@ def chat(
 
     return result
 
+STREAM_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
 @router.post("/chat-stream")
 
 def chat_stream(
@@ -139,7 +147,8 @@ def chat_stream(
         return StreamingResponse(
             not_found(),
             media_type="application/x-ndjson",
-            status_code=404
+            status_code=404,
+            headers=STREAM_HEADERS,
         )
 
     # -----------------------------------
@@ -281,7 +290,14 @@ def chat_stream(
             )
 
             try:
-                refined_title = refine_chat_title(query, complete_response[:400])
+                assistant_count = (
+                    db.query(Message)
+                    .filter(
+                        Message.session_id == session_id,
+                        Message.role == "assistant",
+                    )
+                    .count()
+                )
                 session_record = (
                     db.query(ChatSession)
                     .filter(
@@ -290,7 +306,14 @@ def chat_stream(
                     )
                     .first()
                 )
-                if session_record and refined_title:
+                if (
+                    session_record
+                    and should_refine_session_title(
+                        session_record.title,
+                        assistant_message_count=assistant_count,
+                    )
+                ):
+                    refined_title = refine_chat_title(query, complete_response[:400])
                     session_record.title = refined_title
                     db.commit()
                     yield json.dumps(
@@ -311,5 +334,6 @@ def chat_stream(
 
     return StreamingResponse(
         generate(),
-        media_type="application/x-ndjson"
+        media_type="application/x-ndjson",
+        headers=STREAM_HEADERS,
     )

@@ -66,6 +66,7 @@ import {
   type StreamSource,
 } from "@/lib/api";
 import { useChatStream } from "@/hooks/useChatStream";
+import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 import { isBackendSessionId } from "@/lib/chat-sessions";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useMemory } from "@/hooks/useMemory";
@@ -155,18 +156,7 @@ const workspaceModes = [
   },
 ] as const;
 
-const SIDEBAR_WIDTH_KEY = "omni-ai-sidebar-width";
-const SIDEBAR_MIN_WIDTH = 220;
-const SIDEBAR_MAX_WIDTH = 420;
-const SIDEBAR_DEFAULT_WIDTH = 260;
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
-
-function readSidebarWidth() {
-  if (typeof window === "undefined") return SIDEBAR_DEFAULT_WIDTH;
-  const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
-  if (!Number.isFinite(stored)) return SIDEBAR_DEFAULT_WIDTH;
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, stored));
-}
 
 function readUrlChatId() {
   if (typeof window === "undefined") return null;
@@ -181,9 +171,16 @@ function buildOptimisticTitle(message: string) {
 
 export default function ChatPage() {
   const { session, ready, authenticated } = useRequireAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
-  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  const {
+    width: sidebarWidth,
+    isResizing: isResizingSidebar,
+    open: sidebarOpen,
+    setOpen: setSidebarOpen,
+    isDesktop,
+    onResizeStart,
+    closeSidebar,
+    openSidebar,
+  } = useResizableSidebar();
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
@@ -226,12 +223,15 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const shouldStickToBottomRef = useRef(true);
 
-  useEffect(() => {
-    const syncSidebar = () => setSidebarOpen(window.innerWidth >= 1024);
-    syncSidebar();
-    window.addEventListener("resize", syncSidebar);
-    return () => window.removeEventListener("resize", syncSidebar);
-  }, []);
+  const selectChat = useCallback(
+    (chat: Chat) => {
+      setActiveChat(chat);
+      if (!isDesktop) {
+        closeSidebar();
+      }
+    },
+    [closeSidebar, isDesktop]
+  );
 
   useEffect(() => {
     activeChatIdRef.current = activeChat?.id ?? null;
@@ -244,28 +244,6 @@ export default function ChatPage() {
       window.history.replaceState(null, "", nextUrl);
     }
   }, [activeChat]);
-
-  useEffect(() => {
-    if (!isResizingSidebar) return;
-
-    const handleMouseMove = (event: MouseEvent) => {
-      const nextWidth = Math.min(
-        SIDEBAR_MAX_WIDTH,
-        Math.max(SIDEBAR_MIN_WIDTH, event.clientX)
-      );
-      setSidebarWidth(nextWidth);
-      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(nextWidth));
-    };
-
-    const handleMouseUp = () => setIsResizingSidebar(false);
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isResizingSidebar]);
 
   useEffect(() => {
     if (!activeChat?.id) return;
@@ -415,8 +393,16 @@ export default function ChatPage() {
 
       const applyTitleUpdate = (payload: { session_id: number; title: string }) => {
         const chatId = String(payload.session_id);
-        const updateTitle = (chat: Chat) =>
-          chat.id === chatId ? { ...chat, title: payload.title } : chat;
+        const hasAssistantReply = (chat: Chat) =>
+          chat.messages.some((message) => message.role === "assistant" && message.status !== "error");
+
+        const updateTitle = (chat: Chat) => {
+          if (chat.id !== chatId || hasAssistantReply(chat)) {
+            return chat;
+          }
+          return { ...chat, title: payload.title };
+        };
+
         setChats((prev) => prev.map(updateTitle));
         setActiveChat((prev) => (prev?.id === chatId ? updateTitle(prev) : prev));
       };
@@ -446,7 +432,10 @@ export default function ChatPage() {
         messages: [...updatedChat.messages, aiMessage],
         lastMessage: currentInput,
         timestamp: new Date(),
-        title: streamResult.title?.title || updatedChat.title,
+        title:
+          streamResult.title?.title && !updatedChat.messages.some((m) => m.role === "assistant")
+            ? streamResult.title.title
+            : updatedChat.title,
       };
 
       setActiveChat(completedChat);
@@ -498,6 +487,9 @@ export default function ChatPage() {
     };
     setChats([newChat, ...chats]);
     setActiveChat(newChat);
+    if (!isDesktop) {
+      closeSidebar();
+    }
   };
 
   const handleRenameChat = async (chatId: string) => {
@@ -735,22 +727,27 @@ export default function ChatPage() {
       <AnimatePresence mode="wait">
         {sidebarOpen && (
           <>
-            <motion.button
-              aria-label="Close sidebar"
-              className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSidebarOpen(false)}
-            />
-            <motion.aside
+            {!isDesktop && (
+              <motion.button
+                aria-label="Close sidebar"
+                className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={closeSidebar}
+              />
+            )}
+            <motion.div
               initial={sidebarTransition.initial}
               animate={sidebarTransition.animate}
               exit={sidebarTransition.exit}
               transition={sidebarTransition.transition}
               style={{ width: sidebarWidth }}
-              className="fixed inset-y-0 left-0 z-40 flex h-dvh min-h-0 max-w-[82vw] flex-col border-r border-white/5 bg-[#050505] lg:relative lg:z-auto lg:max-w-none lg:shrink-0"
+              className={`relative z-40 flex h-dvh min-h-0 shrink-0 flex-col border-r border-white/5 bg-[#050505] ${
+                isDesktop ? "" : "fixed inset-y-0 left-0 max-w-[82vw]"
+              }`}
             >
+              <aside className="flex h-full min-h-0 flex-col">
               {/* Sidebar Header */}
               <div className="h-14 flex items-center justify-between px-4 border-b border-white/5">
                 <Link href="/" className="flex items-center gap-2.5">
@@ -779,7 +776,7 @@ export default function ChatPage() {
                         variant="ghost"
                         size="icon"
                         className="size-7 text-muted-foreground/70 hover:text-foreground"
-                        onClick={() => setSidebarOpen(false)}
+                        onClick={() => closeSidebar()}
                       >
                         <PanelLeftClose className="size-4" />
                       </Button>
@@ -823,7 +820,7 @@ export default function ChatPage() {
                             key={chat.id}
                             chat={chat}
                             active={activeChat?.id === chat.id}
-                            onClick={() => setActiveChat(chat)}
+                            onClick={() => selectChat(chat)}
                             onDelete={() => handleDeleteChat(chat.id)}
                             onRename={() => handleRenameChat(chat.id)}
                             onTogglePin={() => handleTogglePin(chat.id)}
@@ -863,7 +860,7 @@ export default function ChatPage() {
                                 key={chat.id}
                                 chat={chat}
                                 active={activeChat?.id === chat.id}
-                                onClick={() => setActiveChat(chat)}
+                                onClick={() => selectChat(chat)}
                                 onDelete={() => handleDeleteChat(chat.id)}
                                 onRename={() => handleRenameChat(chat.id)}
                                 onTogglePin={() => handleTogglePin(chat.id)}
@@ -891,7 +888,7 @@ export default function ChatPage() {
                             key={chat.id}
                             chat={chat}
                             active={activeChat?.id === chat.id}
-                            onClick={() => setActiveChat(chat)}
+                            onClick={() => selectChat(chat)}
                             onDelete={() => handleDeleteChat(chat.id)}
                             onRename={() => handleRenameChat(chat.id)}
                             onTogglePin={() => handleTogglePin(chat.id)}
@@ -945,17 +942,25 @@ export default function ChatPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-            </motion.aside>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize sidebar"
-              onMouseDown={() => setIsResizingSidebar(true)}
-              className={`hidden lg:block fixed top-0 z-50 h-full w-1 cursor-col-resize transition-colors hover:bg-primary/40 ${
-                isResizingSidebar ? "bg-primary/50" : "bg-transparent"
-              }`}
-              style={{ left: sidebarWidth - 2 }}
-            />
+              </aside>
+              {isDesktop && (
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize sidebar"
+                  onPointerDown={onResizeStart}
+                  className={`group absolute inset-y-0 -right-1.5 z-50 w-3 touch-none cursor-col-resize ${
+                    isResizingSidebar ? "bg-primary/10" : ""
+                  }`}
+                >
+                  <div
+                    className={`ml-[5px] h-full w-0.5 transition-colors ${
+                      isResizingSidebar ? "bg-primary" : "bg-transparent group-hover:bg-primary/50"
+                    }`}
+                  />
+                </div>
+              )}
+            </motion.div>
           </>
         )}
       </AnimatePresence>
@@ -972,7 +977,7 @@ export default function ChatPage() {
                     variant="ghost"
                     size="icon"
                     className="size-8 text-muted-foreground hover:text-foreground"
-                    onClick={() => setSidebarOpen(true)}
+                    onClick={openSidebar}
                   >
                     <PanelLeft className="size-4" />
                   </Button>
@@ -1067,7 +1072,7 @@ export default function ChatPage() {
 
         {/* Messages Area */}
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin" onScroll={handleMessagesScroll}>
-          <div className="mx-auto max-w-[720px] px-4 py-8 sm:px-6 sm:py-10">
+          <div className="mx-auto w-full max-w-3xl px-3 py-6 sm:px-6 sm:py-10 xl:max-w-4xl">
             {activeChat?.messages.length === 0 && !isStreaming ? (
               <motion.div
                 variants={fadeUpVariant}
@@ -1269,41 +1274,9 @@ export default function ChatPage() {
                     <ToolVisibility meta={streamingMeta || undefined} memoryFacts={memoryFacts} live />
                     <SourcesPanel sources={streamingMeta?.sources || []} compact />
                     {streamingContent ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[15px] prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 prose-pre:shadow-none prose-pre:m-0 prose-code:text-primary prose-code:font-normal prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-headings:font-semibold prose-headings:tracking-tight prose-h2:text-[18px] prose-h2:mt-6 prose-h2:mb-4 prose-h3:text-[15px] prose-h3:mt-5 prose-h3:mb-2 prose-ul:my-3 prose-li:my-1 text-foreground/90">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            code({ className, children }) {
-                              const match = /language-(\w+)/.exec(className || "");
-                              return match ? (
-                                <div className="relative mt-4 mb-6 rounded-xl overflow-hidden border border-white/5 shadow-inner bg-[#050505]">
-                                  <div className="flex items-center justify-between px-4 py-2 bg-white/[0.02] border-b border-white/5 text-[11px] text-muted-foreground/60 font-medium">
-                                    <span>{match[1]}</span>
-                                  </div>
-                                  <SyntaxHighlighter
-                                    style={syntaxTheme}
-                                    language={match[1]}
-                                    PreTag="div"
-                                    customStyle={{
-                                      margin: 0,
-                                      padding: "1rem",
-                                      background: "transparent",
-                                      fontSize: "13px",
-                                    }}
-                                  >
-                                    {String(children).replace(/\n$/, "")}
-                                  </SyntaxHighlighter>
-                                </div>
-                              ) : (
-                                <code className={className}>
-                                  {children}
-                                </code>
-                              );
-                            },
-                          }}
-                        >
-                          {streamingContent + " █"}
-                        </ReactMarkdown>
+                      <div className="whitespace-pre-wrap text-[15px] leading-[1.7] text-foreground/90">
+                        {streamingContent}
+                        <span className="inline-block w-2 animate-pulse text-primary">█</span>
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-center gap-3">
@@ -1342,8 +1315,8 @@ export default function ChatPage() {
         </div>
 
         {/* Input Area */}
-        <div className="shrink-0 p-3 pt-2 sm:p-4 sm:pt-2">
-          <div className="max-w-[720px] mx-auto">
+        <div className="shrink-0 p-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4 sm:pt-2">
+          <div className="mx-auto w-full max-w-3xl xl:max-w-4xl">
             <input
               ref={fileInputRef}
               type="file"
@@ -1476,7 +1449,7 @@ export default function ChatPage() {
                 <textarea
                   ref={inputRef}
                   placeholder="Message Omni AI..."
-                  className="w-full min-h-[56px] max-h-[32dvh] resize-none bg-transparent px-4 py-4 pr-40 text-[15px] placeholder:text-muted-foreground/40 focus:outline-none leading-relaxed sm:px-5"
+                  className="w-full min-h-[52px] max-h-[32dvh] resize-none bg-transparent px-3 py-3 pr-28 text-[15px] placeholder:text-muted-foreground/40 focus:outline-none leading-relaxed sm:min-h-[56px] sm:px-5 sm:py-4 sm:pr-40"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}

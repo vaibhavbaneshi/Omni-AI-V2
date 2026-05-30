@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -19,12 +20,14 @@ import {
   ChevronDown,
   LogOut,
   Settings,
+  Menu,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { clearSession, getInitials, useSession } from "@/lib/auth";
 
 // Premium motion easing
@@ -47,6 +50,7 @@ export default function LandingPage() {
   const router = useRouter();
   const { session, ready, authenticated } = useSession();
   const initials = getInitials(session?.name);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const handleLogout = () => {
     clearSession();
@@ -84,8 +88,53 @@ export default function LandingPage() {
               </Link>
             </div>
 
+            <div className="flex items-center gap-2 sm:gap-4">
+              <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+                <SheetTrigger
+                  className="inline-flex size-9 items-center justify-center rounded-md text-foreground hover:bg-white/5 md:hidden"
+                  aria-label="Open menu"
+                >
+                  <Menu className="size-5" />
+                </SheetTrigger>
+                <SheetContent side="right" className="w-[min(100vw-2rem,320px)]">
+                  <SheetHeader>
+                    <SheetTitle>Menu</SheetTitle>
+                  </SheetHeader>
+                  <nav className="mt-6 flex flex-col gap-2">
+                    <Link href="#features" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
+                      Features
+                    </Link>
+                    <Link href="#pricing" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
+                      Pricing
+                    </Link>
+                    <Link href="#testimonials" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
+                      Testimonials
+                    </Link>
+                    {ready && authenticated ? (
+                      <>
+                        <Link href="/dashboard" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
+                          Dashboard
+                        </Link>
+                        <Link href="/chat" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
+                          Workspace
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        <Link href="/login" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
+                          Sign in
+                        </Link>
+                        <Link href="/register" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
+                          Get started
+                        </Link>
+                      </>
+                    )}
+                  </nav>
+                </SheetContent>
+              </Sheet>
+
             <motion.div
-              className="flex items-center gap-4"
+              className="flex items-center gap-2 sm:gap-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: ready ? 1 : 0 }}
               transition={{ duration: 0.2 }}
@@ -151,6 +200,7 @@ export default function LandingPage() {
                 <motion.div className="h-8 w-28 rounded-md bg-white/5" aria-hidden />
               )}
             </motion.div>
+            </div>
           </div>
         </div>
       </nav>
