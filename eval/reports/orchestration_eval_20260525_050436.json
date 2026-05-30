@@ -1,0 +1,52 @@
+{
+  "generated_at": "2026-05-25T05:04:36.829818+00:00",
+  "dataset": "../eval/benchmark_dataset.json",
+  "results": [
+    {
+      "id": "rag-001",
+      "strategy": "research-hybrid",
+      "tools": [
+        "retrieval",
+        "memory",
+        "web_search"
+      ],
+      "expected_tools": [
+        "retrieval"
+      ],
+      "route_precision": 0.3333333333333333,
+      "route_recall": 1.0,
+      "correct": true
+    },
+    {
+      "id": "orch-001",
+      "strategy": "research-hybrid",
+      "tools": [
+        "retrieval",
+        "memory",
+        "web_search"
+      ],
+      "expected_tools": [
+        "calculator"
+      ],
+      "route_precision": 0.0,
+      "route_recall": 0.0,
+      "correct": false
+    },
+    {
+      "id": "rag-002",
+      "strategy": "calculator",
+      "tools": [
+        "calculator",
+        "memory"
+      ],
+      "expected_tools": [
+        "retrieval",
+        "summarizer"
+      ],
+      "route_precision": 0.0,
+      "route_recall": 0.0,
+      "correct": false
+    }
+  ],
+  "accuracy": 0.3333333333333333
+}

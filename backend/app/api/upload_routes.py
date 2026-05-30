@@ -40,6 +40,20 @@ async def upload_document(
 ):
     await validate_pdf_upload(file, max_bytes=get_settings().MAX_UPLOAD_BYTES)
 
+    if session_id is not None:
+        from app.models.chat_session import ChatSession
+
+        owned_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+        if not owned_session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
     collection_record = None
 
     if collection_id is not None:
@@ -103,9 +117,10 @@ async def upload_document(
         user_id=current_user.id,
         workspace_id=workspace_id,
         collection_id=collection_record.id,
+        session_id=session_id,
         filename=safe_name,
         storage_path=file_path,
-        chunks_created=0
+        chunks_created=0,
     )
     db.add(document)
     db.commit()
@@ -148,19 +163,23 @@ async def upload_document(
 def list_documents(
     workspace_id: str = "default",
     collection_id: int | None = None,
+    session_id: int | None = None,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     query = (
         db.query(DocumentRecord)
         .filter(
             DocumentRecord.user_id == current_user.id,
-            DocumentRecord.workspace_id == workspace_id
+            DocumentRecord.workspace_id == workspace_id,
         )
     )
 
     if collection_id is not None:
         query = query.filter(DocumentRecord.collection_id == collection_id)
+
+    if session_id is not None:
+        query = query.filter(DocumentRecord.session_id == session_id)
 
     records = query.order_by(DocumentRecord.created_at.desc()).all()
 
@@ -172,7 +191,8 @@ def list_documents(
                 "size": os.path.getsize(document.storage_path) if os.path.exists(document.storage_path) else 0,
                 "updated_at": document.created_at.timestamp() if document.created_at else 0,
                 "collection_id": document.collection_id,
-                "chunks_created": document.chunks_created
+                "session_id": document.session_id,
+                "chunks_created": document.chunks_created,
             }
             for document in records
         ]

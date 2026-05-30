@@ -70,6 +70,13 @@ class DocumentRecord(Base):
         index=True
     )
 
+    session_id = Column(
+        Integer,
+        ForeignKey("chat_sessions.id"),
+        nullable=True,
+        index=True
+    )
+
     workspace_id = Column(
         String,
         nullable=False,

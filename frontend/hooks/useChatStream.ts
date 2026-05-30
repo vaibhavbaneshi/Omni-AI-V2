@@ -17,6 +17,7 @@ export function useChatStream() {
   const contentRef = useRef("");
   const metaRef = useRef<StreamMeta | null>(null);
   const sourcesRef = useRef<StreamSource[]>([]);
+  const titleRef = useRef<{ session_id: number; title: string } | null>(null);
 
   const start = async ({
     query,
@@ -24,12 +25,14 @@ export function useChatStream() {
     mode,
     collectionId,
     token,
+    onTitle,
   }: {
     query: string;
     sessionId: number;
     mode?: string;
     collectionId?: number | null;
     token?: string | null;
+    onTitle?: (payload: { session_id: number; title: string }) => void;
   }) => {
     setIsStreaming(true);
     setStreamingContent("");
@@ -39,6 +42,7 @@ export function useChatStream() {
     contentRef.current = "";
     metaRef.current = null;
     sourcesRef.current = [];
+    titleRef.current = null;
 
     try {
       await streamChat({
@@ -65,6 +69,12 @@ export function useChatStream() {
             return;
           }
 
+          if (event.type === "title") {
+            titleRef.current = { session_id: event.session_id, title: event.title };
+            onTitle?.({ session_id: event.session_id, title: event.title });
+            return;
+          }
+
           if (event.type === "token") {
             contentRef.current += event.content;
             setStreamingContent((current) => current + event.content);
@@ -76,31 +86,29 @@ export function useChatStream() {
         content: contentRef.current,
         meta: metaRef.current,
         sources: sourcesRef.current,
+        title: titleRef.current,
       };
     } catch (error) {
-        // Log detailed error for debugging
-        // ApiError carries `status` and optional `statusText`
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const errAny: any = error;
-        if (errAny?.status) {
-          console.error("streamChat error:", errAny.status, errAny.statusText, errAny.message || errAny);
-        } else {
-          console.error("streamChat error:", error);
-        }
+      const errAny = error as { status?: number; statusText?: string; message?: string };
+      if (errAny?.status) {
+        console.error("streamChat error:", errAny.status, errAny.statusText, errAny.message || errAny);
+      } else {
+        console.error("streamChat error:", error);
+      }
 
-        const message =
-          error instanceof ApiError && error.status === 401
-            ? "Session expired or invalid. Please sign in again."
-            : error instanceof Error
-            ? error.message
-            : "The response stream failed.";
+      const message =
+        error instanceof ApiError && error.status === 401
+          ? "Session expired or invalid. Please sign in again."
+          : error instanceof Error
+          ? error.message
+          : "The response stream failed.";
 
-        if (error instanceof ApiError && error.status === 401) {
-          clearSession();
-        }
+      if (error instanceof ApiError && error.status === 401) {
+        clearSession();
+      }
 
-        setStreamError(message);
-        throw error;
+      setStreamError(message);
+      throw error;
     } finally {
       setIsStreaming(false);
       setStreamingContent("");

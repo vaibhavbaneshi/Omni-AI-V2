@@ -1,9 +1,16 @@
+from __future__ import annotations
+
 from sqlalchemy.orm import Session
 
 from app.core.telemetry import traced_span
 from app.agent.context import ContextAggregator
 from app.agent.schemas import AgentRoute, ContextBundle, TraceEvent
 from app.agent.tools import ToolRegistry
+from app.services.attachment_service import (
+    is_document_query,
+    needs_calculator,
+    session_has_documents,
+)
 from app.tools.calculator import calculator_tool
 from app.tools.memory import memory_tool
 from app.tools.retrieval import retrieval_tool
@@ -20,19 +27,7 @@ FRESHNESS_TERMS = {
     "2025",
     "2026",
     "now",
-    "live"
-}
-
-MATH_TERMS = {
-    "+",
-    "-",
-    "*",
-    "/",
-    "calculate",
-    "multiply",
-    "divide",
-    "sum",
-    "percentage"
+    "live",
 }
 
 SUMMARY_TERMS = {
@@ -40,7 +35,7 @@ SUMMARY_TERMS = {
     "summary",
     "brief",
     "tl;dr",
-    "recap"
+    "recap",
 }
 
 
@@ -58,23 +53,59 @@ class AgentOrchestrator:
     def plan(
         self,
         query: str,
-        mode: str
+        mode: str,
+        *,
+        db: Session | None = None,
+        user_id: int | None = None,
+        session_id: int | None = None,
+        workspace_id: str = "default",
     ) -> AgentRoute:
-
         query_lower = query.lower()
         terms = set(query_lower.replace("?", " ").replace(",", " ").split())
-        needs_math = any(term in query_lower for term in MATH_TERMS)
-        needs_freshness = bool(terms.intersection(FRESHNESS_TERMS))
-        wants_summary = bool(terms.intersection(SUMMARY_TERMS))
+        document_query = is_document_query(query)
+        has_session_docs = (
+            session_has_documents(
+                db,
+                user_id=user_id,
+                session_id=session_id,
+                workspace_id=workspace_id,
+            )
+            if db is not None and user_id is not None
+            else False
+        )
 
-        if needs_math:
+        if document_query:
+            return AgentRoute(
+                strategy="document-retrieval",
+                tools=["retrieval", "memory"],
+                reason="The request references an uploaded document; retrieval is required.",
+                confidence=0.97,
+                mode=mode,
+            )
+
+        if needs_calculator(query):
             return AgentRoute(
                 strategy="calculator",
                 tools=["calculator", "memory"],
                 reason="The request includes a numeric calculation.",
                 confidence=0.95,
-                mode=mode
+                mode=mode,
             )
+
+        if has_session_docs and any(
+            token in query_lower
+            for token in ("document", "file", "pdf", "upload", "attachment", "attached")
+        ):
+            return AgentRoute(
+                strategy="session-document-context",
+                tools=["retrieval", "memory"],
+                reason="This chat has uploaded documents that may be relevant.",
+                confidence=0.9,
+                mode=mode,
+            )
+
+        needs_freshness = bool(terms.intersection(FRESHNESS_TERMS))
+        wants_summary = bool(terms.intersection(SUMMARY_TERMS))
 
         if needs_freshness:
             return AgentRoute(
@@ -82,7 +113,7 @@ class AgentOrchestrator:
                 tools=["retrieval", "memory", "web_search"],
                 reason="The request may depend on current information.",
                 confidence=0.86,
-                mode=mode
+                mode=mode,
             )
 
         if mode == "research":
@@ -91,7 +122,7 @@ class AgentOrchestrator:
                 tools=["retrieval", "memory", "web_search"],
                 reason="Research mode checks internal knowledge and external sources.",
                 confidence=0.78,
-                mode=mode
+                mode=mode,
             )
 
         if wants_summary:
@@ -100,7 +131,7 @@ class AgentOrchestrator:
                 tools=["retrieval", "memory", "summarizer"],
                 reason="The request asks for synthesis over existing context.",
                 confidence=0.82,
-                mode=mode
+                mode=mode,
             )
 
         if mode == "coding":
@@ -109,7 +140,7 @@ class AgentOrchestrator:
                 tools=["retrieval", "memory"],
                 reason="Coding mode prioritizes workspace and memory context.",
                 confidence=0.75,
-                mode=mode
+                mode=mode,
             )
 
         if mode == "analyst":
@@ -118,7 +149,7 @@ class AgentOrchestrator:
                 tools=["retrieval", "memory"],
                 reason="Analyst mode prioritizes structured workspace evidence.",
                 confidence=0.76,
-                mode=mode
+                mode=mode,
             )
 
         return AgentRoute(
@@ -126,7 +157,7 @@ class AgentOrchestrator:
             tools=["retrieval", "memory"],
             reason="The request can likely be answered from workspace context and memory.",
             confidence=0.72,
-            mode=mode
+            mode=mode,
         )
 
     def run(
@@ -138,26 +169,32 @@ class AgentOrchestrator:
         workspace_id: str = "default",
         collection_id: int | None = None,
         session_id: int | None = None,
-        history: str = ""
+        history: str = "",
     ) -> ContextBundle:
-
         traces = [
             TraceEvent(
                 phase="routing",
                 status="started",
-                message="Planning agent route"
+                message="Planning agent route",
             )
         ]
 
         with traced_span("orchestration.plan", mode=mode):
-            route = self.plan(query=query, mode=mode)
+            route = self.plan(
+                query=query,
+                mode=mode,
+                db=db,
+                user_id=user_id,
+                session_id=session_id,
+                workspace_id=workspace_id,
+            )
 
         traces.append(
             TraceEvent(
                 phase="routing",
                 status="complete",
                 message=route.reason,
-                metadata=route.to_dict()
+                metadata=route.to_dict(),
             )
         )
 
@@ -169,7 +206,7 @@ class AgentOrchestrator:
                     phase="tool",
                     status="started",
                     message=f"Running {tool_name}",
-                    tool=tool_name
+                    tool=tool_name,
                 )
             )
 
@@ -194,5 +231,5 @@ class AgentOrchestrator:
         return self.aggregator.aggregate(
             route=route,
             tool_results=results,
-            traces=traces
+            traces=traces,
         )

@@ -36,9 +36,10 @@ def cache_retrieval_result(
     user_id: int | None,
     workspace_id: str,
     collection_id: int | None,
+    session_id: int | None = None,
     value: Any,
 ) -> None:
-    key = _cache_key("retrieval", query, user_id, workspace_id, collection_id)
+    key = _cache_key("retrieval", query, user_id, workspace_id, collection_id, session_id)
     set_cached(key, value)
 
 
@@ -48,6 +49,7 @@ def get_retrieval_cache(
     user_id: int | None,
     workspace_id: str,
     collection_id: int | None,
+    session_id: int | None = None,
 ) -> Any | None:
-    key = _cache_key("retrieval", query, user_id, workspace_id, collection_id)
+    key = _cache_key("retrieval", query, user_id, workspace_id, collection_id, session_id)
     return get_cached(key)

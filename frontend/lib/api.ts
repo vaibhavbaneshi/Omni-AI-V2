@@ -86,14 +86,20 @@ export type UploadDocumentResponse = {
 export async function uploadDocument(
   file: File,
   token?: string | null,
-  collectionId?: number | null
+  options?: {
+    collectionId?: number | null;
+    sessionId?: number | null;
+  }
 ) {
   const formData = new FormData();
   formData.append("file", file);
   const params = new URLSearchParams();
 
-  if (collectionId) {
-    params.set("collection_id", String(collectionId));
+  if (options?.collectionId) {
+    params.set("collection_id", String(options.collectionId));
+  }
+  if (options?.sessionId) {
+    params.set("session_id", String(options.sessionId));
   }
 
   return apiRequest<UploadDocumentResponse>(
@@ -112,11 +118,23 @@ export type DocumentRecord = {
   size: number;
   updated_at: number;
   collection_id: number;
+  session_id?: number | null;
   chunks_created: number;
 };
 
-export async function listDocuments(token?: string | null) {
-  return apiRequest<{ documents: DocumentRecord[] }>("/documents", {}, token);
+export async function listDocuments(
+  token?: string | null,
+  options?: { sessionId?: number | null; collectionId?: number | null }
+) {
+  const params = new URLSearchParams();
+  if (options?.sessionId) {
+    params.set("session_id", String(options.sessionId));
+  }
+  if (options?.collectionId) {
+    params.set("collection_id", String(options.collectionId));
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return apiRequest<{ documents: DocumentRecord[] }>(`/documents${suffix}`, {}, token);
 }
 
 export async function deleteDocument(filename: string, token?: string | null) {
@@ -168,13 +186,36 @@ export async function listChatSessions(token?: string | null) {
   return apiRequest<ChatSessionRecord[]>("/sessions", {}, token);
 }
 
-export async function createChatSession(title: string, token?: string | null) {
-  const params = new URLSearchParams({ title });
+export async function createChatSession(
+  firstMessage: string,
+  token?: string | null,
+  options?: { title?: string }
+) {
+  const params = new URLSearchParams();
+  if (options?.title) {
+    params.set("title", options.title);
+  }
+  if (firstMessage.trim()) {
+    params.set("first_message", firstMessage.trim());
+  }
   return apiRequest<ChatSessionRecord>(
     `/sessions?${params.toString()}`,
     {
       method: "POST",
     },
+    token
+  );
+}
+
+export async function updateChatSessionTitle(
+  sessionId: number,
+  title: string,
+  token?: string | null
+) {
+  const params = new URLSearchParams({ title });
+  return apiRequest<ChatSessionRecord>(
+    `/sessions/${sessionId}?${params.toString()}`,
+    { method: "PATCH" },
     token
   );
 }
@@ -238,6 +279,7 @@ export type ChatStreamEvent =
   | { type: "status"; phase: string; message: string; tool?: string }
   | { type: "error"; message: string }
   | { type: "token"; content: string }
+  | { type: "title"; session_id: number; title: string }
   | { type: "done" };
 
 export async function streamChat({

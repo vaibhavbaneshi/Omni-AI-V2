@@ -60,6 +60,7 @@ import {
   createChatSession,
   getChatSessionMessages,
   listChatSessions,
+  updateChatSessionTitle,
   type DocumentRecord,
   type StreamMeta,
   type StreamSource,
@@ -154,117 +155,39 @@ const workspaceModes = [
   },
 ] as const;
 
-const initialChats: Chat[] = [
-  {
-    id: "local-1",
-    title: "React Performance Optimization",
-    lastMessage: "How do I optimize this component?",
-    timestamp: new Date(Date.now() - 1000 * 60 * 30),
-    pinned: true,
-    messages: [
-      {
-        id: "1-1",
-        role: "user",
-        content: "How do I optimize this React component for better performance?",
-        timestamp: new Date(Date.now() - 1000 * 60 * 35),
-      },
-      {
-        id: "1-2",
-        role: "assistant",
-        content: `Here are several effective strategies to optimize your React component for better performance:
+const SIDEBAR_WIDTH_KEY = "omni-ai-sidebar-width";
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_DEFAULT_WIDTH = 260;
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
-## 1. Use React.memo() for Pure Components
+function readSidebarWidth() {
+  if (typeof window === "undefined") return SIDEBAR_DEFAULT_WIDTH;
+  const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+  if (!Number.isFinite(stored)) return SIDEBAR_DEFAULT_WIDTH;
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, stored));
+}
 
-Wrap components that receive the same props frequently to prevent unnecessary re-renders:
+function readUrlChatId() {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("id");
+}
 
-\`\`\`jsx
-const MyComponent = React.memo(({ data }) => {
-  return <div>{data.name}</div>;
-});
-\`\`\`
-
-## 2. Implement useMemo() for Expensive Calculations
-
-Cache computed values that don't need to be recalculated on every render:
-
-\`\`\`jsx
-const expensiveValue = useMemo(() => {
-  return computeExpensiveValue(a, b);
-}, [a, b]);
-\`\`\`
-
-## 3. Use useCallback() for Function References
-
-Stabilize function references passed to child components:
-
-\`\`\`jsx
-const handleClick = useCallback(() => {
-  doSomething(id);
-}, [id]);
-\`\`\`
-
-## 4. Virtualize Long Lists
-
-For lists with many items, use libraries like \`react-window\` or \`@tanstack/react-virtual\` to only render visible items.
-
-Would you like me to show you specific examples for your component?`,
-        timestamp: new Date(Date.now() - 1000 * 60 * 34),
-        model: "gpt-4",
-        sources: [
-          {
-            title: "React Documentation - Optimization",
-            source: "react.dev",
-            chunk: "React memoization and rendering guidance for optimizing component updates.",
-            score: 0.92,
-            strategy: "demo",
-            url: "https://react.dev/learn",
-          },
-          {
-            title: "Web.dev Performance Guide",
-            source: "web.dev",
-            chunk: "Performance guidance for reducing layout shifts and improving perceived response time.",
-            score: 0.88,
-            strategy: "demo",
-            url: "https://web.dev/performance",
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "local-2",
-    title: "Python Data Analysis",
-    lastMessage: "Can you help with pandas?",
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2),
-    folder: "Work",
-    messages: [],
-  },
-  {
-    id: "local-3",
-    title: "API Design Best Practices",
-    lastMessage: "RESTful vs GraphQL comparison",
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24),
-    folder: "Work",
-    messages: [],
-  },
-  {
-    id: "local-4",
-    title: "Machine Learning Basics",
-    lastMessage: "What is gradient descent?",
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 48),
-    messages: [],
-  },
-];
+function buildOptimisticTitle(message: string) {
+  const trimmed = message.trim();
+  if (!trimmed) return "New Chat";
+  return trimmed.length > 42 ? `${trimmed.slice(0, 42).trim()}…` : trimmed;
+}
 
 export default function ChatPage() {
   const { session, ready, authenticated } = useRequireAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [chats, setChats] = useState<Chat[]>(initialChats);
-  const [activeChat, setActiveChat] = useState<Chat | null>(() => {
-    if (typeof window === "undefined") return initialChats[0];
-    const chatId = new URLSearchParams(window.location.search).get("id");
-    return initialChats.find((chat) => chat.id === chatId) || initialChats[0];
-  });
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChat, setActiveChat] = useState<Chat | null>(null);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const activeChatIdRef = useRef<string | null>(null);
   const [selectedModel, setSelectedModel] = useState("gpt-4");
   const [selectedMode, setSelectedMode] = useState<(typeof workspaceModes)[number]["id"]>("research");
   const [input, setInput] = useState("");
@@ -293,7 +216,7 @@ export default function ChatPage() {
     refresh: refreshDocuments,
     upload: uploadWorkspaceDocument,
     remove: removeWorkspaceDocument,
-  } = useDocuments(session?.token);
+  } = useDocuments(session?.token, activeChat?.id ?? null);
   const { memories, addMemory, removeMemory } = useMemory(session?.token);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [deletingDocument, setDeletingDocument] = useState<string | null>(null);
@@ -311,12 +234,46 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    activeChatIdRef.current = activeChat?.id ?? null;
+  }, [activeChat?.id]);
+
+  useEffect(() => {
     if (!activeChat) return;
     const nextUrl = `/chat?id=${encodeURIComponent(activeChat.id)}`;
     if (window.location.pathname + window.location.search !== nextUrl) {
       window.history.replaceState(null, "", nextUrl);
     }
   }, [activeChat]);
+
+  useEffect(() => {
+    if (!isResizingSidebar) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const nextWidth = Math.min(
+        SIDEBAR_MAX_WIDTH,
+        Math.max(SIDEBAR_MIN_WIDTH, event.clientX)
+      );
+      setSidebarWidth(nextWidth);
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(nextWidth));
+    };
+
+    const handleMouseUp = () => setIsResizingSidebar(false);
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizingSidebar]);
+
+  useEffect(() => {
+    if (!activeChat?.id) return;
+    setAttachedFile(null);
+    setUploadStatus("idle");
+    setUploadMessage(null);
+    setIsDraggingFile(false);
+  }, [activeChat?.id, setUploadMessage, setUploadStatus]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (!shouldStickToBottomRef.current) return;
@@ -343,10 +300,10 @@ export default function ChatPage() {
   useEffect(() => {
     if (!authenticated || !session?.token) return;
 
+    const urlChatId = readUrlChatId();
+
     listChatSessions(session.token)
       .then((records) => {
-        if (records.length === 0) return;
-
         const nextChats: Chat[] = records.map((record) => ({
           id: String(record.id),
           title: record.title,
@@ -356,20 +313,33 @@ export default function ChatPage() {
         }));
 
         setChats(nextChats);
+
+        if (nextChats.length === 0) {
+          setActiveChat(null);
+          return;
+        }
+
+        const urlMatch = urlChatId
+          ? nextChats.find((chat) => chat.id === urlChatId)
+          : null;
+
         setActiveChat((current) => {
-          if (current && records.some((record) => String(record.id) === current.id)) {
+          if (urlMatch) return urlMatch;
+          if (current && nextChats.some((chat) => chat.id === current.id)) {
             return current;
           }
           return nextChats[0];
         });
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setSessionsLoaded(true));
   }, [authenticated, session?.token]);
 
   useEffect(() => {
     const numericId = isBackendSessionId(activeChat?.id) ? Number(activeChat.id) : null;
+    const chatId = activeChat?.id;
 
-    if (!session?.token || !activeChat || numericId === null) return;
+    if (!session?.token || !activeChat || numericId === null || !chatId) return;
     if (activeChat.messages.length > 0) return;
 
     getChatSessionMessages(numericId, session.token)
@@ -382,11 +352,15 @@ export default function ChatPage() {
           model: record.role === "assistant" ? selectedModel : undefined,
         }));
 
-        setActiveChat((current) => current?.id === activeChat.id ? { ...current, messages } : current);
-        setChats((prev) => prev.map((chat) => chat.id === activeChat.id ? { ...chat, messages } : chat));
+        setActiveChat((current) =>
+          current?.id === chatId ? { ...current, messages } : current
+        );
+        setChats((prev) =>
+          prev.map((chat) => (chat.id === chatId ? { ...chat, messages } : chat))
+        );
       })
       .catch(() => undefined);
-  }, [activeChat, selectedModel, session?.token]);
+  }, [activeChat?.id, activeChat?.messages.length, selectedModel, session?.token]);
 
   const handleSend = async (overrideInput?: string, options?: { appendUser?: boolean; chatOverride?: Chat }) => {
     const messageText = (overrideInput ?? input).trim();
@@ -409,10 +383,12 @@ export default function ChatPage() {
 
     try {
       if (!chatForRequest || !isBackendSessionId(chatForRequest.id)) {
-        const created = await createChatSession(currentInput.slice(0, 80) || "New Chat", session?.token);
+        const created = await createChatSession(currentInput, session?.token, {
+          title: "New Chat",
+        });
         const createdChat: Chat = {
           id: String(created.id),
-          title: created.title,
+          title: buildOptimisticTitle(currentInput),
           lastMessage: currentInput,
           timestamp: new Date(),
           messages: [],
@@ -428,18 +404,30 @@ export default function ChatPage() {
         messages: appendUser ? [...chatForRequest.messages, userMessage] : chatForRequest.messages,
         lastMessage: currentInput,
         timestamp: new Date(),
-        title: chatForRequest.title === "New Chat" ? currentInput.slice(0, 42) : chatForRequest.title,
+        title:
+          chatForRequest.title === "New Chat"
+            ? buildOptimisticTitle(currentInput)
+            : chatForRequest.title,
       };
 
       setActiveChat(updatedChat);
       setChats((prev) => prev.map((c) => (c.id === updatedChat.id ? updatedChat : c)));
 
+      const applyTitleUpdate = (payload: { session_id: number; title: string }) => {
+        const chatId = String(payload.session_id);
+        const updateTitle = (chat: Chat) =>
+          chat.id === chatId ? { ...chat, title: payload.title } : chat;
+        setChats((prev) => prev.map(updateTitle));
+        setActiveChat((prev) => (prev?.id === chatId ? updateTitle(prev) : prev));
+      };
+
       const streamResult = await startChatStream({
         query: currentInput,
         sessionId: Number(updatedChat.id),
         mode: selectedMode,
-        collectionId: activeCollectionId,
+        collectionId: isBackendSessionId(updatedChat.id) ? undefined : activeCollectionId,
         token: session?.token,
+        onTitle: applyTitleUpdate,
       });
 
       const aiMessage: Message = {
@@ -456,6 +444,9 @@ export default function ChatPage() {
       const completedChat = {
         ...updatedChat,
         messages: [...updatedChat.messages, aiMessage],
+        lastMessage: currentInput,
+        timestamp: new Date(),
+        title: streamResult.title?.title || updatedChat.title,
       };
 
       setActiveChat(completedChat);
@@ -509,7 +500,7 @@ export default function ChatPage() {
     setActiveChat(newChat);
   };
 
-  const handleRenameChat = (chatId: string) => {
+  const handleRenameChat = async (chatId: string) => {
     const chat = chats.find((item) => item.id === chatId);
     const nextTitle = window.prompt("Rename chat", chat?.title || "New Chat")?.trim();
     if (!nextTitle) return;
@@ -517,6 +508,14 @@ export default function ChatPage() {
     const update = (item: Chat) => (item.id === chatId ? { ...item, title: nextTitle } : item);
     setChats((prev) => prev.map(update));
     setActiveChat((prev) => (prev?.id === chatId ? update(prev) : prev));
+
+    if (isBackendSessionId(chatId)) {
+      try {
+        await updateChatSessionTitle(Number(chatId), nextTitle, session?.token);
+      } catch {
+        // keep optimistic title
+      }
+    }
   };
 
   const handleTogglePin = (chatId: string) => {
@@ -624,6 +623,26 @@ export default function ChatPage() {
     fileInputRef.current?.click();
   };
 
+  const ensureBackendChat = async (seedTitle?: string): Promise<Chat> => {
+    if (activeChat && isBackendSessionId(activeChat.id)) {
+      return activeChat;
+    }
+
+    const created = await createChatSession(seedTitle || "New Chat", session?.token, {
+      title: "New Chat",
+    });
+    const createdChat: Chat = {
+      id: String(created.id),
+      title: created.title || "New Chat",
+      lastMessage: "",
+      timestamp: new Date(),
+      messages: activeChat?.messages || [],
+    };
+    setActiveChat(createdChat);
+    setChats((prev) => [createdChat, ...prev.filter((chat) => chat.id !== activeChat?.id)]);
+    return createdChat;
+  };
+
   const processSelectedFile = async (file: File) => {
     if (!file) return;
 
@@ -634,12 +653,20 @@ export default function ChatPage() {
       return;
     }
 
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setAttachedFile(null);
+      setUploadStatus("error");
+      setUploadMessage(`File exceeds the ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))}MB limit.`);
+      return;
+    }
+
     setAttachedFile(file);
     setUploadStatus("uploading");
     setUploadMessage(null);
 
     try {
-      await uploadWorkspaceDocument(file);
+      const chat = await ensureBackendChat(file.name.replace(/\.pdf$/i, ""));
+      await uploadWorkspaceDocument(file, { sessionId: Number(chat.id) });
     } catch (error) {
       setUploadStatus("error");
       setUploadMessage(
@@ -721,204 +748,214 @@ export default function ChatPage() {
               animate={sidebarTransition.animate}
               exit={sidebarTransition.exit}
               transition={sidebarTransition.transition}
-              className="fixed inset-y-0 left-0 z-40 flex h-dvh min-h-0 w-[min(82vw,280px)] flex-col border-r border-white/5 bg-[#050505] lg:relative lg:z-auto lg:w-[260px] lg:shrink-0"
+              style={{ width: sidebarWidth }}
+              className="fixed inset-y-0 left-0 z-40 flex h-dvh min-h-0 max-w-[82vw] flex-col border-r border-white/5 bg-[#050505] lg:relative lg:z-auto lg:max-w-none lg:shrink-0"
             >
-            {/* Sidebar Header */}
-            <div className="h-14 flex items-center justify-between px-4 border-b border-white/5">
-              <Link href="/" className="flex items-center gap-2.5">
-                <div className="size-6 rounded-md bg-gradient-to-br from-primary to-chart-2 flex items-center justify-center">
-                  <Sparkles className="size-3.5 text-primary-foreground" />
-                </div>
-                <span className="text-[15px] font-semibold tracking-tight">Omni AI</span>
-              </Link>
-              <div className="flex items-center gap-0.5">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-muted-foreground/70 hover:text-foreground"
-                      onClick={handleNewChat}
-                    >
-                      <Plus className="size-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">New chat</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-muted-foreground/70 hover:text-foreground"
-                      onClick={() => setSidebarOpen(false)}
-                    >
-                      <PanelLeftClose className="size-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Close sidebar</TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-
-            {/* Search */}
-            <div className="p-3">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/60" />
-                <Input
-                  placeholder="Search..."
-                  className="pl-8 h-8 text-[12px] bg-white/[0.02] border-white/5 focus:border-white/10 focus:bg-white/[0.04] placeholder:text-muted-foreground/50 transition-colors shadow-inner"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 text-[10px] text-muted-foreground/50">
-                  <Command className="size-3" />K
-                </div>
-              </div>
-            </div>
-
-            {/* Chat List */}
-            <ScrollArea className="min-h-0 flex-1 px-2">
-              <div className="py-1">
-                {/* Pinned Section */}
-                {pinnedChats.length > 0 && (
-                  <div className="mb-3">
-                    <div className="flex items-center gap-2 px-2 py-1.5">
-                      <Star className="size-3 text-muted-foreground/50" />
-                      <span className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wide">
-                        Pinned
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-px">
-                      {pinnedChats.map((chat) => (
-                        <ChatItem
-                          key={chat.id}
-                          chat={chat}
-                          active={activeChat?.id === chat.id}
-                          onClick={() => setActiveChat(chat)}
-                          onDelete={() => handleDeleteChat(chat.id)}
-                          onRename={() => handleRenameChat(chat.id)}
-                          onTogglePin={() => handleTogglePin(chat.id)}
-                          onMoveToWork={() => handleMoveToWork(chat.id)}
-                          formatTime={formatTime}
-                        />
-                      ))}
-                    </div>
+              {/* Sidebar Header */}
+              <div className="h-14 flex items-center justify-between px-4 border-b border-white/5">
+                <Link href="/" className="flex items-center gap-2.5">
+                  <div className="size-6 rounded-md bg-gradient-to-br from-primary to-chart-2 flex items-center justify-center">
+                    <Sparkles className="size-3.5 text-primary-foreground" />
                   </div>
-                )}
+                  <span className="text-[15px] font-semibold tracking-tight">Omni AI</span>
+                </Link>
+                <div className="flex items-center gap-0.5">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 text-muted-foreground/70 hover:text-foreground"
+                        onClick={handleNewChat}
+                      >
+                        <Plus className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">New chat</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 text-muted-foreground/70 hover:text-foreground"
+                        onClick={() => setSidebarOpen(false)}
+                      >
+                        <PanelLeftClose className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Close sidebar</TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
 
-                {/* Folders */}
-                {folders.map((folder) => (
-                  <div key={folder} className="mb-2">
-                    <button
-                      className="group flex items-center gap-2 px-2 py-1 w-full hover:bg-white/5 rounded-md transition-colors"
-                      onClick={() => toggleFolder(folder)}
-                    >
-                      <ChevronRight
-                        className={`size-3 text-muted-foreground/50 transition-transform ${
-                          expandedFolders.includes(folder) ? "rotate-90" : ""
-                        }`}
-                      />
-                      <Folder className="size-3 text-muted-foreground/50" />
-                      <span className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wide">
-                        {folder}
-                      </span>
-                      <span className="ml-auto text-[10px] text-muted-foreground/40">
-                        {filteredChats.filter((c) => c.folder === folder).length}
-                      </span>
-                    </button>
-                    {expandedFolders.includes(folder) && (
-                      <div className="flex flex-col gap-px mt-1 ml-2">
-                        {filteredChats
-                          .filter((c) => c.folder === folder)
-                          .map((chat) => (
-                            <ChatItem
-                              key={chat.id}
-                              chat={chat}
-                              active={activeChat?.id === chat.id}
-                              onClick={() => setActiveChat(chat)}
-                              onDelete={() => handleDeleteChat(chat.id)}
-                              onRename={() => handleRenameChat(chat.id)}
-                              onTogglePin={() => handleTogglePin(chat.id)}
-                              onMoveToWork={() => handleMoveToWork(chat.id)}
-                              formatTime={formatTime}
-                            />
-                          ))}
+              {/* Search */}
+              <div className="p-3">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/60" />
+                  <Input
+                    placeholder="Search..."
+                    className="pl-8 h-8 text-[12px] bg-white/[0.02] border-white/5 focus:border-white/10 focus:bg-white/[0.04] placeholder:text-muted-foreground/50 transition-colors shadow-inner"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 text-[10px] text-muted-foreground/50">
+                    <Command className="size-3" />K
+                  </div>
+                </div>
+              </div>
+
+              {/* Chat List */}
+              <ScrollArea className="min-h-0 flex-1 px-2">
+                <div className="py-1">
+                  {/* Pinned Section */}
+                  {pinnedChats.length > 0 && (
+                    <div className="mb-3">
+                      <div className="flex items-center gap-2 px-2 py-1.5">
+                        <Star className="size-3 text-muted-foreground/50" />
+                        <span className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wide">
+                          Pinned
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
-
-                {/* Recent / Unfoldered */}
-                {unfolderedChats.length > 0 && (
-                  <div className="mb-3">
-                    <div className="flex items-center gap-2 px-2 py-1.5">
-                      <Clock className="size-3 text-muted-foreground/50" />
-                      <span className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wide">
-                        Recent
-                      </span>
+                      <div className="flex flex-col gap-px">
+                        {pinnedChats.map((chat) => (
+                          <ChatItem
+                            key={chat.id}
+                            chat={chat}
+                            active={activeChat?.id === chat.id}
+                            onClick={() => setActiveChat(chat)}
+                            onDelete={() => handleDeleteChat(chat.id)}
+                            onRename={() => handleRenameChat(chat.id)}
+                            onTogglePin={() => handleTogglePin(chat.id)}
+                            onMoveToWork={() => handleMoveToWork(chat.id)}
+                            formatTime={formatTime}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-px">
-                      {unfolderedChats.map((chat) => (
-                        <ChatItem
-                          key={chat.id}
-                          chat={chat}
-                          active={activeChat?.id === chat.id}
-                          onClick={() => setActiveChat(chat)}
-                          onDelete={() => handleDeleteChat(chat.id)}
-                          onRename={() => handleRenameChat(chat.id)}
-                          onTogglePin={() => handleTogglePin(chat.id)}
-                          onMoveToWork={() => handleMoveToWork(chat.id)}
-                          formatTime={formatTime}
+                  )}
+
+                  {/* Folders */}
+                  {folders.map((folder) => (
+                    <div key={folder} className="mb-2">
+                      <button
+                        className="group flex items-center gap-2 px-2 py-1 w-full hover:bg-white/5 rounded-md transition-colors"
+                        onClick={() => toggleFolder(folder)}
+                      >
+                        <ChevronRight
+                          className={`size-3 text-muted-foreground/50 transition-transform ${expandedFolders.includes(folder) ? "rotate-90" : ""
+                            }`}
                         />
-                      ))}
+                        <Folder className="size-3 text-muted-foreground/50" />
+                        <span className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wide">
+                          {folder}
+                        </span>
+                        <span className="ml-auto text-[10px] text-muted-foreground/40">
+                          {filteredChats.filter((c) => c.folder === folder).length}
+                        </span>
+                      </button>
+                      {expandedFolders.includes(folder) && (
+                        <div className="flex flex-col gap-px mt-1 ml-2">
+                          {filteredChats
+                            .filter((c) => c.folder === folder)
+                            .map((chat) => (
+                              <ChatItem
+                                key={chat.id}
+                                chat={chat}
+                                active={activeChat?.id === chat.id}
+                                onClick={() => setActiveChat(chat)}
+                                onDelete={() => handleDeleteChat(chat.id)}
+                                onRename={() => handleRenameChat(chat.id)}
+                                onTogglePin={() => handleTogglePin(chat.id)}
+                                onMoveToWork={() => handleMoveToWork(chat.id)}
+                                formatTime={formatTime}
+                              />
+                            ))}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
+                  ))}
 
-            {/* Sidebar Footer */}
-            <div className="p-2 border-t border-white/5">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors group">
-                    <Avatar className="size-6 ring-1 ring-white/10">
-                      <AvatarFallback className="bg-gradient-to-br from-primary/20 to-chart-2/20 text-[10px] font-medium text-foreground">
-                        {initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 text-left min-w-0">
-                      <p className="text-[12px] font-medium truncate leading-tight group-hover:text-foreground transition-colors text-muted-foreground">{displayName}</p>
-                      <p className="text-[10px] text-muted-foreground/50 truncate">Pro Plan</p>
+                  {/* Recent / Unfoldered */}
+                  {unfolderedChats.length > 0 && (
+                    <div className="mb-3">
+                      <div className="flex items-center gap-2 px-2 py-1.5">
+                        <Clock className="size-3 text-muted-foreground/50" />
+                        <span className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wide">
+                          Recent
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-px">
+                        {unfolderedChats.map((chat) => (
+                          <ChatItem
+                            key={chat.id}
+                            chat={chat}
+                            active={activeChat?.id === chat.id}
+                            onClick={() => setActiveChat(chat)}
+                            onDelete={() => handleDeleteChat(chat.id)}
+                            onRename={() => handleRenameChat(chat.id)}
+                            onTogglePin={() => handleTogglePin(chat.id)}
+                            onMoveToWork={() => handleMoveToWork(chat.id)}
+                            formatTime={formatTime}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <ChevronDown className="size-3.5 text-muted-foreground/40 shrink-0 group-hover:text-muted-foreground/80 transition-colors" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-52">
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem asChild>
-                      <Link href="/dashboard">
-                        <LayoutDashboard data-icon="inline-start" />
-                        Dashboard
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <Link href="/settings">
-                        <Settings data-icon="inline-start" />
-                        Settings
-                      </Link>
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout}>
+                  )}
+                </div>
+              </ScrollArea>
+
+              {/* Sidebar Footer */}
+              <div className="p-2 border-t border-white/5">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors group">
+                      <Avatar className="size-6 ring-1 ring-white/10">
+                        <AvatarFallback className="bg-gradient-to-br from-primary/20 to-chart-2/20 text-[10px] font-medium text-foreground">
+                          {initials}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 text-left min-w-0">
+                        <p className="text-[12px] font-medium truncate leading-tight group-hover:text-foreground transition-colors text-muted-foreground">{displayName}</p>
+                        <p className="text-[10px] text-muted-foreground/50 truncate">Pro Plan</p>
+                      </div>
+                      <ChevronDown className="size-3.5 text-muted-foreground/40 shrink-0 group-hover:text-muted-foreground/80 transition-colors" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-52">
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem asChild>
+                        <Link href="/dashboard">
+                          <LayoutDashboard data-icon="inline-start" />
+                          Dashboard
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link href="/settings">
+                          <Settings data-icon="inline-start" />
+                          Settings
+                        </Link>
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogout}>
                       <LogOut data-icon="inline-start" />
                       Sign Out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </motion.aside>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize sidebar"
+              onMouseDown={() => setIsResizingSidebar(true)}
+              className={`hidden lg:block fixed top-0 z-50 h-full w-1 cursor-col-resize transition-colors hover:bg-primary/40 ${
+                isResizingSidebar ? "bg-primary/50" : "bg-transparent"
+              }`}
+              style={{ left: sidebarWidth - 2 }}
+            />
           </>
         )}
       </AnimatePresence>
@@ -976,11 +1013,10 @@ export default function ChatPage() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition-colors ${
-                        selectedMode === mode.id
+                      className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition-colors ${selectedMode === mode.id
                           ? "bg-primary/15 text-foreground"
                           : "text-muted-foreground/65 hover:bg-white/[0.04] hover:text-foreground"
-                      }`}
+                        }`}
                       onClick={() => setSelectedMode(mode.id)}
                     >
                       <mode.icon className="size-3.5" />
@@ -994,8 +1030,8 @@ export default function ChatPage() {
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
-            <Badge 
-              variant="outline" 
+            <Badge
+              variant="outline"
               className="hidden h-6 gap-1.5 bg-success/5 px-2.5 text-[10px] font-normal text-success border-success/20 sm:inline-flex"
             >
               <span className="size-1.5 rounded-full bg-success animate-pulse" />
@@ -1039,9 +1075,9 @@ export default function ChatPage() {
                 animate="animate"
                 className="text-center pt-20 pb-16"
               >
-                <motion.div 
+                <motion.div
                   className="size-14 rounded-2xl bg-gradient-to-br from-primary/15 to-chart-2/15 flex items-center justify-center mx-auto mb-8 ring-1 ring-primary/10"
-                  animate={{ 
+                  animate={{
                     scale: [1, 1.02, 1],
                   }}
                   transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
@@ -1103,7 +1139,7 @@ export default function ChatPage() {
                       <div className="group">
                         <ToolVisibility meta={message.toolMeta} memoryFacts={memoryFacts} />
                         <SourcesPanel sources={message.sources || []} />
-                        
+
                         {/* Message Content */}
                         <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[15px] prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 prose-pre:shadow-none prose-pre:m-0 prose-code:text-primary prose-code:font-normal prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-headings:font-semibold prose-headings:tracking-tight prose-h2:text-[18px] prose-h2:mt-6 prose-h2:mb-4 prose-h3:text-[15px] prose-h3:mt-5 prose-h3:mb-2 prose-ul:my-3 prose-li:my-1 text-foreground/90">
                           <ReactMarkdown
@@ -1115,7 +1151,7 @@ export default function ChatPage() {
                                   <div className="relative mt-4 mb-6 rounded-xl overflow-hidden border border-white/5 shadow-inner bg-[#050505]">
                                     <div className="flex items-center justify-between px-4 py-2 bg-white/[0.02] border-b border-white/5 text-[11px] text-muted-foreground/60 font-medium">
                                       <span>{match[1]}</span>
-                                      <button 
+                                      <button
                                         onClick={() => handleCopy(String(children).replace(/\n$/, ""), message.id)}
                                         className="hover:text-foreground transition-colors flex items-center gap-1.5"
                                       >
@@ -1148,7 +1184,7 @@ export default function ChatPage() {
                             {message.content}
                           </ReactMarkdown>
                         </div>
-                        
+
                         {/* Message Actions */}
                         <div className="flex items-center gap-2 mt-6 pt-3 border-t border-white/5">
                           <div className="flex items-center gap-2">
@@ -1321,11 +1357,10 @@ export default function ChatPage() {
                 <button
                   key={mode.id}
                   type="button"
-                  className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-colors ${
-                    selectedMode === mode.id
+                  className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-colors ${selectedMode === mode.id
                       ? "bg-primary/15 text-foreground"
                       : "text-muted-foreground/65"
-                  }`}
+                    }`}
                   onClick={() => setSelectedMode(mode.id)}
                 >
                   <mode.icon className="size-3.5" />
@@ -1348,11 +1383,10 @@ export default function ChatPage() {
             )}
 
             <div
-              className={`mb-3 rounded-xl border border-dashed px-3 py-3 transition-all ${
-                isDraggingFile
+              className={`mb-3 rounded-xl border border-dashed px-3 py-3 transition-all ${isDraggingFile
                   ? "border-primary/50 bg-primary/10"
                   : "border-white/10 bg-white/[0.015]"
-              }`}
+                }`}
               onDragOver={(event) => {
                 event.preventDefault();
                 setIsDraggingFile(true);
@@ -1376,30 +1410,16 @@ export default function ChatPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-[12px] font-medium text-foreground/85">
-                      Drop PDFs to add workspace knowledge
+                      Drop PDFs to attach to this chat
                     </p>
                     <p className="truncate text-[11px] text-muted-foreground/55">
                       {documents.length > 0
-                        ? `${documents.length} document${documents.length === 1 ? "" : "s"} indexed`
-                        : "Authenticated uploads are indexed for retrieval"}
+                        ? `${documents.length} file${documents.length === 1 ? "" : "s"} in this chat`
+                        : "PDFs uploaded here are scoped to this conversation"}
                     </p>
                   </div>
                 </button>
                 <div className="flex flex-wrap gap-1.5">
-                  {collections.length > 0 && (
-                    <select
-                      className="h-6 rounded-full border border-white/10 bg-[#050505] px-2 text-[10px] text-muted-foreground outline-none"
-                      value={activeCollectionId || ""}
-                      onChange={(event) => setActiveCollectionId(Number(event.target.value))}
-                      aria-label="Document collection"
-                    >
-                      {collections.map((collection) => (
-                        <option key={collection.id} value={collection.id}>
-                          {collection.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
                   {documents.slice(0, 3).map((document) => (
                     <DocumentChip
                       key={document.filename}
@@ -1442,9 +1462,8 @@ export default function ChatPage() {
                 )}
                 {uploadMessage && (
                   <p
-                    className={`text-[11px] ${
-                      uploadStatus === "error" ? "text-destructive" : "text-emerald-300"
-                    }`}
+                    className={`text-[11px] ${uploadStatus === "error" ? "text-destructive" : "text-emerald-300"
+                      }`}
                   >
                     {uploadMessage}
                   </p>
@@ -1466,9 +1485,9 @@ export default function ChatPage() {
                 <div className="absolute bottom-3 right-3 flex items-center gap-1">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
                         onClick={() => input.trim() && addMemory(input.trim())}
                         disabled={!input.trim()}
@@ -1480,9 +1499,9 @@ export default function ChatPage() {
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
                         onClick={handleAttachmentClick}
                         disabled={uploadStatus === "uploading"}
@@ -1494,9 +1513,9 @@ export default function ChatPage() {
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
                         onClick={() => setInput((prev) => prev || "Transcribe this voice note")}
                       >
@@ -1792,11 +1811,10 @@ function ChatItem({
 }) {
   return (
     <div
-      className={`group relative flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer transition-colors duration-150 ${
-        active
+      className={`group relative flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer transition-colors duration-150 ${active
           ? "bg-white/5 text-foreground shadow-[inset_2px_0_0_0_rgba(var(--primary))]"
           : "text-muted-foreground/70 hover:bg-white/[0.03] hover:text-foreground"
-      }`}
+        }`}
       onClick={onClick}
     >
       <Hash className={`size-3.5 shrink-0 ${active ? "text-primary" : "opacity-50"}`} />

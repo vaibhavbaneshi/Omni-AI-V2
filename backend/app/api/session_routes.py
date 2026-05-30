@@ -10,7 +10,8 @@ from app.models.chat_session import (
 )
 
 from app.services.title_service import (
-    generate_chat_title
+    generate_chat_title,
+    refine_chat_title,
 )
 
 from app.models.message import Message
@@ -115,25 +116,82 @@ def get_session_messages(
         for message in messages
     ]
 
-@router.post("/sessions")
-def create_session(
+@router.patch("/sessions/{session_id}")
+def update_session(
+    session_id: int,
     title: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.id == session_id,
+            ChatSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not session:
+        return {"error": "Session not found"}
+
+    cleaned = title.strip()[:120] or session.title
+    session.title = cleaned
+    db.commit()
+    db.refresh(session)
+
+    return {"id": session.id, "title": session.title}
+
+
+@router.post("/sessions/{session_id}/title/refine")
+def refine_session_title(
+    session_id: int,
+    first_message: str,
+    assistant_preview: str = "",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.id == session_id,
+            ChatSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not session:
+        return {"error": "Session not found"}
+
+    title = refine_chat_title(first_message, assistant_preview)
+    session.title = title
+    db.commit()
+    db.refresh(session)
+
+    return {"id": session.id, "title": session.title}
+
+
+@router.post("/sessions")
+def create_session_with_title(
+    title: str = "New Chat",
+    first_message: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    resolved_title = title.strip() or "New Chat"
+    if first_message and first_message.strip():
+        resolved_title = generate_chat_title(first_message.strip())
 
     session = ChatSession(
-        title=title,
-        user_id=current_user.id
+        title=resolved_title,
+        user_id=current_user.id,
     )
 
     db.add(session)
-
     db.commit()
-
     db.refresh(session)
 
     return {
         "id": session.id,
-        "title": session.title
+        "title": session.title,
     }

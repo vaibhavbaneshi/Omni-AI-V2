@@ -64,13 +64,15 @@ def retrieve_context(
     query: str,
     user_id=None,
     workspace_id="default",
-    collection_id=None
+    collection_id=None,
+    session_id=None,
 ):
     cached = get_retrieval_cache(
         query=query,
         user_id=user_id,
         workspace_id=workspace_id,
         collection_id=collection_id,
+        session_id=session_id,
     )
     if cached is not None:
         return cached
@@ -82,6 +84,7 @@ def retrieve_context(
             user_id=user_id,
             workspace_id=workspace_id,
             collection_id=collection_id,
+            session_id=session_id,
         )
 
     if not chunks:
@@ -99,6 +102,7 @@ def retrieve_context(
         user_id=user_id,
         workspace_id=workspace_id,
         collection_id=collection_id,
+        session_id=session_id,
         value=context,
     )
     return context
@@ -108,22 +112,33 @@ def retrieve_context_details(
     query: str,
     user_id=None,
     workspace_id="default",
-    collection_id=None
+    collection_id=None,
+    session_id=None,
 ):
+    chunks = hybrid_search(
+        query=query,
+        top_k=10,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id,
+        session_id=session_id,
+    )
 
     sources = semantic_search_with_metadata(
         query=query,
         top_k=5,
         user_id=user_id,
         workspace_id=workspace_id,
-        collection_id=collection_id
+        collection_id=collection_id,
+        session_id=session_id,
     )
 
-    chunks = [
-        source["chunk"]
-        for source in sources
-        if source.get("chunk")
-    ]
+    if not chunks:
+        chunks = [
+            source["chunk"]
+            for source in sources
+            if source.get("chunk")
+        ]
 
     reranked_chunks = rerank_documents(
         query=query,
@@ -131,9 +146,7 @@ def retrieve_context_details(
         top_k=3
     ) if chunks else []
 
-    context = "\n\n".join(
-        reranked_chunks
-    )
+    context = sanitize_retrieved_context(reranked_chunks)
 
     ranked_sources = []
 
@@ -154,8 +167,96 @@ def retrieve_context_details(
     return {
         "context": context,
         "sources": ranked_sources,
-        "strategy": "hybrid-semantic-rerank",
-        "chunks": len(ranked_sources)
+        "strategy": "hybrid-rerank",
+        "chunks": len(ranked_sources),
+    }
+
+
+def retrieve_session_document_context(
+    *,
+    db,
+    user_id: int,
+    session_id: int,
+    workspace_id: str = "default",
+    query: str = "",
+    max_chunks: int = 12,
+):
+    """Load indexed chunks for all PDFs attached to this chat session."""
+    from app.models.document import DocumentRecord
+    from app.services.documents_services import collection as chroma_collection
+
+    documents = (
+        db.query(DocumentRecord)
+        .filter(
+            DocumentRecord.user_id == user_id,
+            DocumentRecord.workspace_id == workspace_id,
+            DocumentRecord.session_id == session_id,
+        )
+        .order_by(DocumentRecord.created_at.desc())
+        .all()
+    )
+
+    if not documents:
+        return {"context": "", "sources": [], "strategy": "session-documents", "chunks": 0}
+
+    chunks: list[str] = []
+    sources: list[dict] = []
+
+    for document in documents:
+        try:
+            matches = chroma_collection.get(
+                where={
+                    "$and": [
+                        {"user_id": str(user_id)},
+                        {"document_id": str(document.id)},
+                    ]
+                },
+                include=["documents", "metadatas"],
+            )
+        except Exception:
+            matches = {"documents": [], "metadatas": []}
+
+        doc_chunks = matches.get("documents") or []
+        metadatas = matches.get("metadatas") or []
+
+        for index, chunk in enumerate(doc_chunks):
+            if not chunk or not str(chunk).strip():
+                continue
+            chunks.append(str(chunk))
+            metadata = metadatas[index] if index < len(metadatas) else {}
+            sources.append(
+                {
+                    "title": document.filename,
+                    "source": document.filename,
+                    "chunk": str(chunk),
+                    "score": 1.0,
+                    "strategy": "session-document",
+                    "type": "document",
+                    "metadata": metadata or {},
+                }
+            )
+            if len(chunks) >= max_chunks:
+                break
+        if len(chunks) >= max_chunks:
+            break
+
+    if query.strip() and len(chunks) > 3:
+        reranked = rerank_documents(query=query, documents=chunks, top_k=min(8, len(chunks)))
+    else:
+        reranked = chunks[:max_chunks]
+
+    context = sanitize_retrieved_context(reranked, max_chunks=max_chunks)
+    ranked_sources = []
+    for chunk in reranked:
+        source = next((item for item in sources if item.get("chunk") == chunk), None)
+        if source:
+            ranked_sources.append(source)
+
+    return {
+        "context": context,
+        "sources": ranked_sources or sources[: len(reranked)],
+        "strategy": "session-documents",
+        "chunks": len(reranked),
     }
 
 # -----------------------------------
@@ -241,6 +342,8 @@ def stream_response(
     summary="",
     mode="research",
     route=None,
+    require_grounding=False,
+    document_summary=False,
 ):
     # Route metadata is exposed to the UI via stream meta events, not in the model prompt.
     _ = route
@@ -251,6 +354,8 @@ def stream_response(
         history=history or "",
         summary=summary or "",
         mode=mode or "research",
+        require_grounding=require_grounding,
+        document_summary=document_summary,
     )
 
     ollama_url = settings.OLLAMA_URL

@@ -44,9 +44,9 @@ from app.services.summary_service import (
     summarize_conversation
 )
 
-from app.core.security import (
-    get_current_user
-)
+from app.services.title_service import refine_chat_title
+from app.services.attachment_service import is_document_query
+from app.core.security import get_current_user
 from app.core.app_settings import get_settings
 from app.core.sanitize import sanitize_user_query
 from app.models.user import User
@@ -199,12 +199,15 @@ def chat_stream(
             history=history
         )
 
+        refusal = agent_result.get("refusal")
         context = agent_result["context"]
         sources = agent_result.get("sources", [])
         tool_used = agent_result.get("tool", "rag")
         strategy = agent_result.get("strategy", tool_used)
         route = agent_result.get("route", {})
         workspace_mode = agent_result.get("mode", mode)
+        document_summary = is_document_query(query) and bool((context or "").strip())
+        require_grounding = is_document_query(query) and not document_summary
 
         yield json.dumps(
             {
@@ -224,6 +227,19 @@ def chat_stream(
             }
         ) + "\n"
 
+        if refusal:
+            complete_response = refusal
+            yield json.dumps({"type": "token", "content": refusal}) + "\n"
+            save_message(
+                db=db,
+                session_id=session_id,
+                role="assistant",
+                content=complete_response,
+                user_id=current_user.id
+            )
+            yield json.dumps({"type": "done"}) + "\n"
+            return
+
         try:
             generator = stream_response(
                 query=query,
@@ -231,7 +247,9 @@ def chat_stream(
                 history=history,
                 summary=summary,
                 mode=workspace_mode,
-                route=route
+                route=route,
+                require_grounding=require_grounding,
+                document_summary=document_summary,
             )
 
             for token in generator:
@@ -261,6 +279,29 @@ def chat_stream(
                 content=complete_response,
                 user_id=current_user.id
             )
+
+            try:
+                refined_title = refine_chat_title(query, complete_response[:400])
+                session_record = (
+                    db.query(ChatSession)
+                    .filter(
+                        ChatSession.id == session_id,
+                        ChatSession.user_id == current_user.id,
+                    )
+                    .first()
+                )
+                if session_record and refined_title:
+                    session_record.title = refined_title
+                    db.commit()
+                    yield json.dumps(
+                        {
+                            "type": "title",
+                            "session_id": session_id,
+                            "title": refined_title,
+                        }
+                    ) + "\n"
+            except Exception:
+                pass
 
         yield json.dumps(
             {

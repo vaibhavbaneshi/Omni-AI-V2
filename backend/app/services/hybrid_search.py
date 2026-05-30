@@ -67,13 +67,15 @@ def build_filter(
 def get_scoped_documents(
     user_id=None,
     workspace_id="default",
-    collection_id=None
+    collection_id=None,
+    session_id=None,
 ):
 
     where_filter = build_filter(
         user_id=user_id,
         workspace_id=workspace_id,
-        collection_id=collection_id
+        collection_id=collection_id,
+        session_id=session_id,
     )
 
     if where_filter:
@@ -101,13 +103,15 @@ def bm25_search(
     top_k=3,
     user_id=None,
     workspace_id="default",
-    collection_id=None
+    collection_id=None,
+    session_id=None,
 ):
 
     scoped = get_scoped_documents(
         user_id=user_id,
         workspace_id=workspace_id,
-        collection_id=collection_id
+        collection_id=collection_id,
+        session_id=session_id,
     )
     documents = scoped.get("documents", [])
 
@@ -150,7 +154,8 @@ def semantic_search(
     top_k=3,
     user_id=None,
     workspace_id="default",
-    collection_id=None
+    collection_id=None,
+    session_id=None,
 ):
 
     embedding = embedding_model.encode(
@@ -160,7 +165,8 @@ def semantic_search(
     where_filter = build_filter(
         user_id=user_id,
         workspace_id=workspace_id,
-        collection_id=collection_id
+        collection_id=collection_id,
+        session_id=session_id,
     )
 
     query_args = {
@@ -184,21 +190,24 @@ def hybrid_search(
     top_k=5,
     user_id=None,
     workspace_id="default",
-    collection_id=None
+    collection_id=None,
+    session_id=None,
 ):
 
     semantic_results = semantic_search(
         query,
         user_id=user_id,
         workspace_id=workspace_id,
-        collection_id=collection_id
+        collection_id=collection_id,
+        session_id=session_id,
     )
 
     bm25_results = bm25_search(
         query,
         user_id=user_id,
         workspace_id=workspace_id,
-        collection_id=collection_id
+        collection_id=collection_id,
+        session_id=session_id,
     )
 
     combined = list(
@@ -215,7 +224,8 @@ def semantic_search_with_metadata(
     top_k=5,
     user_id=None,
     workspace_id="default",
-    collection_id=None
+    collection_id=None,
+    session_id=None,
 ):
 
     embedding = embedding_model.encode(
@@ -225,7 +235,8 @@ def semantic_search_with_metadata(
     where_filter = build_filter(
         user_id=user_id,
         workspace_id=workspace_id,
-        collection_id=collection_id
+        collection_id=collection_id,
+        session_id=session_id,
     )
 
     query_args = {

@@ -33,14 +33,17 @@ def build_stream_prompt(
     history: str = "",
     summary: str = "",
     mode: str = "research",
+    require_grounding: bool = False,
+    document_summary: bool = False,
 ) -> str:
     effective_mode = "coding" if looks_like_coding_request(query, mode) else mode
 
     mode_instructions = {
         "research": """
-Answer the user's question directly in clean Markdown.
-Use short sections only when they improve readability.
-Cite sources inline when document labels are present in context.
+Answer directly in clean, natural Markdown.
+Lead with the answer, then add supporting detail only when it helps.
+Use short paragraphs and tight bullet lists. Avoid filler and repetition.
+Cite document sources inline when reference material is present.
 """,
         "coding": """
 The user wants code. Respond in this order:
@@ -48,16 +51,16 @@ The user wants code. Respond in this order:
 2. A single fenced code block with the full solution (correct language tag, e.g. ```tsx or ```jsx).
 3. At most 3 brief bullets for setup or usage notes — only if necessary.
 
-Do not add tutorial links, "learning resources", or long explanations unless explicitly asked.
+Do not add tutorial links or long explanations unless explicitly asked.
 Prefer modern React (function components, ES modules). Indent code consistently (2 spaces).
 """,
         "writing": """
 Improve clarity and structure while preserving intent.
-Return polished prose; avoid meta-commentary about the task.
+Return polished prose with natural flow; avoid meta-commentary about the task.
 """,
         "analyst": """
-Present findings with clear structure: summary, evidence, implications.
-Stay concise and avoid repeating the question verbatim.
+Present findings clearly: brief summary, key evidence, implications.
+Use structured bullets when comparing options. Stay concise and readable.
 """,
     }
 
@@ -78,22 +81,46 @@ Stay concise and avoid repeating the question verbatim.
         )
 
     if context.strip():
+        label = (
+            "Uploaded document content for this chat — summarize and answer from this text only"
+            if document_summary
+            else "Reference material — use when relevant; do not invent facts beyond this"
+        )
         blocks.append(
-            f"""[Reference material — use when relevant; do not invent facts beyond this]
+            f"""[{label}]
 {context.strip()}"""
         )
 
     context_section = "\n\n".join(blocks) if blocks else "(No additional reference material.)"
 
-    return f"""You are Omni AI, a precise assistant in a professional workspace.
+    grounding_rules = ""
+    if document_summary and context.strip():
+        grounding_rules = """
+DOCUMENT SUMMARY (mandatory):
+- The user uploaded a PDF to THIS chat. The text above is from that uploaded file.
+- Summarize or answer using ONLY the uploaded document content above.
+- Do NOT say no file was attached — the document text is already provided above.
+- Do NOT invent content that is not in the document text.
+"""
+    elif require_grounding:
+        grounding_rules = """
+DOCUMENT GROUNDING (mandatory):
+- Answer ONLY from the reference material above.
+- If reference material is empty or insufficient, say you cannot find the requested document content.
+- NEVER invent filenames, sections, or document contents.
+"""
+
+    return f"""You are Omni AI, a precise and conversational assistant in a professional workspace.
 
 OUTPUT RULES (mandatory):
 - Reply ONLY with content the user should read. No hidden reasoning.
+- Write like a thoughtful expert: clear, natural, and easy to scan.
 - NEVER output sections or headings such as: "Organized Answer", "Important Facts", "User Intent",
   "Technical Topics", "Decisions Made", "ROUTING PLAN", or "CONVERSATION SUMMARY".
 - NEVER list or describe your internal tools, routing, or memory process unless the user asks.
 - Do not end with filler like "Please let me know if you have questions" unless the user asked for help choosing options.
-- Use proper Markdown: headings sparingly, fenced code blocks for code, consistent spacing.
+- Use proper Markdown: headings sparingly, fenced code blocks for code, consistent spacing, readable bullet hierarchy.
+{grounding_rules}
 
 STYLE FOR THIS TURN:
 {mode_block}

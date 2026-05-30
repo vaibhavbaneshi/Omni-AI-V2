@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-05-25T05:04:26.895176+00:00",
+  "dataset": "../eval/benchmark_dataset.json",
+  "results": [
+    {
+      "id": "rag-001",
+      "engine": "heuristic",
+      "metrics": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 1.0,
+        "context_precision": 0.6666666666666666,
+        "context_recall": 1.0,
+        "hallucination": 0.0
+      }
+    },
+    {
+      "id": "orch-001",
+      "engine": "heuristic",
+      "metrics": {
+        "faithfulness": 0.5,
+        "answer_relevancy": 0.4,
+        "context_precision": 0.0,
+        "context_recall": 1.0,
+        "hallucination": 0.7
+      }
+    },
+    {
+      "id": "rag-002",
+      "engine": "heuristic",
+      "metrics": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 1.0,
+        "context_precision": 0.3333333333333333,
+        "context_recall": 1.0,
+        "hallucination": 0.0
+      }
+    }
+  ]
+}

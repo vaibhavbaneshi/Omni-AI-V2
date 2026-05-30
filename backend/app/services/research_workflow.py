@@ -18,6 +18,7 @@ def run_deep_research(
     db: Session,
     workspace_id: str = "default",
     collection_id: int | None = None,
+    session_id: int | None = None,
     max_iterations: int = 3,
 ) -> dict:
     """Iteratively refine retrieval and web sources for analyst-style answers."""
@@ -36,6 +37,7 @@ def run_deep_research(
                 user_id=user_id,
                 workspace_id=workspace_id,
                 collection_id=collection_id,
+                session_id=session_id,
             )
             reranked = rerank_documents(query=refined_query, documents=docs, top_k=4)
             document_chunks = list(dict.fromkeys(document_chunks + reranked))
