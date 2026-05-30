@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 import logging
 
+import app.core.chroma_client  # noqa: F401 — silence Chroma telemetry before other imports
+
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

@@ -1,4 +1,9 @@
-import chromadb
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from app.core.chroma_client import get_collection
 import requests
 from sentence_transformers import SentenceTransformer
 
@@ -26,17 +31,7 @@ embedding_model = SentenceTransformer(
 # CHROMADB
 # -----------------------------
 
-client = chromadb.PersistentClient(
-
-    path="./chroma_db"
-
-)
-
-collection = client.get_collection(
-
-    name=COLLECTION_NAME
-
-)
+collection = get_collection(COLLECTION_NAME)
 
 # -----------------------------
 # USER QUERY
