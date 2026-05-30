@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useMemo } from "react";
 import {
   Activity,
   ArrowRight,
@@ -13,7 +14,6 @@ import {
   Clock,
   Command,
   Cpu,
-  CreditCard,
   Database,
   FileText,
   Gauge,
@@ -30,6 +30,17 @@ import {
   Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -37,96 +48,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
+import { formatCount, useAnalytics } from "@/hooks/useAnalytics";
 import { cn } from "@/lib/utils";
-
-const stats = [
-  {
-    title: "Messages Routed",
-    value: "12,847",
-    change: "+12%",
-    detail: "1.8K autonomous assists",
-    icon: MessageSquare,
-    accent: "text-primary bg-primary/10 ring-primary/20",
-  },
-  {
-    title: "Knowledge Indexed",
-    value: "156",
-    change: "+8%",
-    detail: "24 docs refreshed",
-    icon: FileText,
-    accent: "text-cyan-300 bg-cyan-400/10 ring-cyan-300/20",
-  },
-  {
-    title: "Compute Calls",
-    value: "45.2K",
-    change: "+24%",
-    detail: "99.98% success rate",
-    icon: Zap,
-    accent: "text-amber-300 bg-amber-400/10 ring-amber-300/20",
-  },
-  {
-    title: "Live Operators",
-    value: "3",
-    change: "Stable",
-    detail: "All workspaces synced",
-    icon: Users,
-    accent: "text-emerald-300 bg-emerald-400/10 ring-emerald-300/20",
-  },
-];
-
-const recentChats = [
-  {
-    id: "1",
-    title: "React Component Optimization",
-    preview: "Reduced render churn and consolidated memo boundaries for a faster editor.",
-    model: "GPT-4",
-    time: "30 min ago",
-    status: "Ready",
-  },
-  {
-    id: "2",
-    title: "Python Data Analysis",
-    preview: "Explored pandas transformations, edge cases, and chart-ready exports.",
-    model: "Claude 3",
-    time: "2 hours ago",
-    status: "Review",
-  },
-  {
-    id: "3",
-    title: "API Design Best Practices",
-    preview: "Mapped REST and GraphQL tradeoffs for a multi-client service layer.",
-    model: "GPT-4",
-    time: "Yesterday",
-    status: "Pinned",
-  },
-  {
-    id: "4",
-    title: "Database Schema Review",
-    preview: "Audited indexes, foreign keys, and migration risks for PostgreSQL.",
-    model: "GPT-4",
-    time: "2 days ago",
-    status: "Closed",
-  },
-];
-
-const usageByModel = [
-  { model: "GPT-4", usage: 45, color: "bg-primary" },
-  { model: "Claude 3", usage: 30, color: "bg-cyan-300" },
-  { model: "GPT-3.5", usage: 20, color: "bg-emerald-300" },
-  { model: "Gemini", usage: 5, color: "bg-amber-300" },
-];
-
-const systemSignals = [
-  { label: "Context health", value: "96%", icon: Brain },
-  { label: "Latency median", value: "184ms", icon: Gauge },
-  { label: "Memory sync", value: "Live", icon: Database },
-];
-
-const agentQueue = [
-  { name: "Research Copilot", state: "Scanning", load: 72 },
-  { name: "Code Navigator", state: "Idle", load: 18 },
-  { name: "Docs Synthesizer", state: "Writing", load: 54 },
-];
 
 const quickActions = [
   {
@@ -147,7 +70,7 @@ const quickActions = [
     title: "View Analytics",
     description: "Inspect usage and throughput",
     icon: BarChart3,
-    href: "/settings",
+    href: "/dashboard",
     accent: "text-emerald-300 bg-emerald-400/10",
   },
   {
@@ -167,6 +90,80 @@ const fadeIn = {
 export default function DashboardPage() {
   const router = useRouter();
   const { session, ready, authenticated } = useRequireAuth();
+  const { overview, platform, sessions, loading, error } = useAnalytics(session?.token, 30);
+
+  const stats = useMemo(() => {
+    if (!overview) return [];
+    const topModel = overview.ai.model_breakdown[0]?.model ?? "—";
+    return [
+      {
+        title: "Messages",
+        value: formatCount(overview.users.messages ?? 0),
+        change: `${overview.period_days}d`,
+        detail: `${overview.users.sessions ?? 0} sessions`,
+        icon: MessageSquare,
+        accent: "text-primary bg-primary/10 ring-primary/20",
+      },
+      {
+        title: "Documents",
+        value: formatCount(overview.rag.uploads),
+        change: "Indexed",
+        detail: `${overview.rag.ingestion_runs} ingest runs`,
+        icon: FileText,
+        accent: "text-cyan-300 bg-cyan-400/10 ring-cyan-300/20",
+      },
+      {
+        title: "Tokens Used",
+        value: formatCount(overview.ai.total_tokens),
+        change: topModel,
+        detail: `${overview.ai.avg_latency_ms}ms avg latency`,
+        icon: Zap,
+        accent: "text-amber-300 bg-amber-400/10 ring-amber-300/20",
+      },
+      {
+        title: platform ? "Active Users" : "API Requests",
+        value: formatCount(
+          platform?.users.active_users_24h ?? overview.users.api_requests ?? 0
+        ),
+        change: platform ? "24h" : "Period",
+        detail: platform
+          ? `${platform.users.total_users ?? 0} total users`
+          : "Your workspace traffic",
+        icon: Users,
+        accent: "text-emerald-300 bg-emerald-400/10 ring-emerald-300/20",
+      },
+    ];
+  }, [overview, platform]);
+
+  const systemSignals = useMemo(() => {
+    if (!overview) return [];
+    return [
+      {
+        label: "Avg latency",
+        value: `${overview.ai.avg_latency_ms}ms`,
+        icon: Gauge,
+      },
+      {
+        label: "Token volume",
+        value: formatCount(overview.ai.total_tokens),
+        icon: Brain,
+      },
+      {
+        label: "RAG uploads",
+        value: String(overview.rag.uploads),
+        icon: Database,
+      },
+    ];
+  }, [overview]);
+
+  const modelColors = ["bg-primary", "bg-cyan-300", "bg-emerald-300", "bg-amber-300", "bg-violet-300"];
+  const usageByModel = (overview?.ai.model_breakdown ?? []).map((item, index) => ({
+    model: item.model,
+    usage: item.share_pct,
+    color: modelColors[index % modelColors.length],
+  }));
+
+  const tokenChartData = overview?.ai.daily_tokens ?? [];
 
   if (!ready || !authenticated) {
     return <div className="min-h-screen bg-background" />;
@@ -240,6 +237,18 @@ export default function DashboardPage() {
       </header>
 
       <main className="relative z-10 mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        {error && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+
+        {loading && !overview && (
+          <div className="rounded-lg border border-white/10 bg-card/50 px-4 py-8 text-center text-sm text-muted-foreground">
+            Loading analytics…
+          </div>
+        )}
+
         <motion.section
           {...fadeIn}
           className="grid gap-4 rounded-lg border border-white/10 bg-card/70 p-4 shadow-premium backdrop-blur-xl sm:p-6 lg:grid-cols-[1.4fr_0.6fr]"
@@ -320,6 +329,40 @@ export default function DashboardPage() {
           ))}
         </section>
 
+        {tokenChartData.length > 0 && (
+          <motion.section {...fadeIn} transition={{ delay: 0.2 }}>
+            <Card className="rounded-lg border-white/10 bg-card/65 shadow-premium">
+              <CardHeader>
+                <CardTitle className="text-lg">Token Usage</CardTitle>
+                <CardDescription>Daily token consumption over the last {overview?.period_days ?? 30} days</CardDescription>
+              </CardHeader>
+              <CardContent className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={tokenChartData}>
+                    <defs>
+                      <linearGradient id="tokenGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="oklch(0.65 0.25 275)" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="oklch(0.65 0.25 275)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                    <XAxis dataKey="date" tick={{ fill: "#888", fontSize: 11 }} />
+                    <YAxis tick={{ fill: "#888", fontSize: 11 }} />
+                    <Tooltip
+                      contentStyle={{
+                        background: "rgba(10,10,15,0.95)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: 8,
+                      }}
+                    />
+                    <Area type="monotone" dataKey="tokens" stroke="oklch(0.65 0.25 275)" fill="url(#tokenGradient)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </motion.section>
+        )}
+
         <section className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.85fr)]">
           <motion.div {...fadeIn} transition={{ delay: 0.25 }}>
             <Card className="rounded-lg border-white/10 bg-card/65 shadow-premium">
@@ -335,7 +378,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="px-2 pb-3 sm:px-3">
                 <div className="space-y-1">
-                  {recentChats.map((chat) => (
+                  {(sessions.length ? sessions.slice(0, 6) : []).map((chat) => (
                     <Link
                       key={chat.id}
                       href={`/chat?id=${chat.id}`}
@@ -347,21 +390,18 @@ export default function DashboardPage() {
                       <div className="min-w-0">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <p className="truncate font-medium group-hover:text-primary">{chat.title}</p>
-                          <Badge variant="outline" className="border-white/10 bg-white/[0.03] text-xs">
-                            {chat.model}
-                          </Badge>
-                          <Badge variant="secondary" className="bg-white/[0.04] text-xs text-muted-foreground">
-                            {chat.status}
-                          </Badge>
                         </div>
-                        <p className="mt-1 truncate text-sm text-muted-foreground">{chat.preview}</p>
+                        <p className="mt-1 truncate text-sm text-muted-foreground">Session #{chat.id}</p>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground sm:justify-end">
                         <Clock className="size-3" />
-                        {chat.time}
+                        Open
                       </div>
                     </Link>
                   ))}
+                  {!sessions.length && !loading && (
+                    <p className="px-3 py-6 text-center text-sm text-muted-foreground">No chats yet. Start a conversation to see activity here.</p>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -375,10 +415,10 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="space-y-5">
                 <div className="space-y-4">
-                  {usageByModel.map((item) => (
+                  {usageByModel.length ? usageByModel.map((item) => (
                     <div key={item.model} className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium">{item.model}</span>
+                        <span className="font-medium truncate pr-2">{item.model}</span>
                         <span className="font-mono text-muted-foreground">{item.usage}%</span>
                       </div>
                       <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
@@ -390,60 +430,57 @@ export default function DashboardPage() {
                         />
                       </div>
                     </div>
-                  ))}
+                  )) : (
+                    <p className="text-sm text-muted-foreground">No model usage recorded yet.</p>
+                  )}
                 </div>
 
                 <Separator />
 
                 <div className="grid gap-3 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Current plan</span>
-                    <Badge>Pro</Badge>
+                    <span className="text-muted-foreground">Period</span>
+                    <span>{overview?.period_days ?? 30} days</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Messages left</span>
-                    <span className="font-medium">Unlimited</span>
+                    <span className="text-muted-foreground">Total tokens</span>
+                    <span className="font-medium">{formatCount(overview?.ai.total_tokens ?? 0)}</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Renewal</span>
-                    <span>June 15, 2026</span>
-                  </div>
+                  {platform && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Platform users</span>
+                      <span>{platform.users.total_users ?? 0}</span>
+                    </div>
+                  )}
                 </div>
-
-                <Link
-                  href="/settings"
-                  className={cn(buttonVariants({ variant: "outline" }), "w-full border-white/10 bg-white/[0.03] hover:bg-white/[0.07]")}
-                >
-                  <CreditCard data-icon="inline-start" />
-                  Manage Billing
-                </Link>
               </CardContent>
             </Card>
 
-            <Card className="rounded-lg border-white/10 bg-card/65 shadow-premium">
-              <CardHeader>
-                <CardTitle className="text-lg">Agent Queue</CardTitle>
-                <CardDescription>Background workers and current load</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {agentQueue.map((agent) => (
-                  <div key={agent.name} className="rounded-lg bg-white/[0.035] p-3 ring-1 ring-white/5">
-                    <div className="mb-2 flex items-center justify-between text-sm">
-                      <span className="font-medium">{agent.name}</span>
-                      <span className="text-muted-foreground">{agent.state}</span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
-                      <motion.div
-                        className="h-full rounded-full bg-emerald-300"
-                        initial={{ width: 0 }}
-                        animate={{ width: `${agent.load}%` }}
-                        transition={{ duration: 0.7, delay: 0.45 }}
+            {platform?.ai.endpoint_latency && platform.ai.endpoint_latency.length > 0 && (
+              <Card className="rounded-lg border-white/10 bg-card/65 shadow-premium">
+                <CardHeader>
+                  <CardTitle className="text-lg">Endpoint Latency</CardTitle>
+                  <CardDescription>Admin view — top API paths by volume</CardDescription>
+                </CardHeader>
+                <CardContent className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={platform.ai.endpoint_latency.slice(0, 6)} layout="vertical" margin={{ left: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                      <XAxis type="number" tick={{ fill: "#888", fontSize: 10 }} unit="ms" />
+                      <YAxis type="category" dataKey="path" width={100} tick={{ fill: "#888", fontSize: 10 }} />
+                      <Tooltip
+                        contentStyle={{
+                          background: "rgba(10,10,15,0.95)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: 8,
+                        }}
                       />
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
+                      <Bar dataKey="avg_latency_ms" fill="oklch(0.75 0.15 160)" radius={4} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
           </motion.div>
         </section>
 

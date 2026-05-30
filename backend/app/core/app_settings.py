@@ -81,6 +81,9 @@ class AppSettings(BaseSettings):
     # Phase 4 — comma-separated admin emails allowed to POST /evaluation/run in production.
     EVAL_ADMIN_EMAILS: str = ""
 
+    # Phase 6 — admin emails for platform analytics (falls back to EVAL_ADMIN_EMAILS).
+    ANALYTICS_ADMIN_EMAILS: str = ""
+
     ENABLE_DEEP_RESEARCH: bool = False
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 

@@ -68,8 +68,9 @@ def test_evaluation_admin_gate_blocks_production(monkeypatch):
     class _Settings:
         ENVIRONMENT = "production"
         EVAL_ADMIN_EMAILS = "admin@example.com"
+        ANALYTICS_ADMIN_EMAILS = ""
 
-    monkeypatch.setattr("app.api.evaluation_routes.get_settings", lambda: _Settings())
+    monkeypatch.setattr("app.core.admin_access.get_settings", lambda: _Settings())
 
     with pytest.raises(HTTPException) as exc:
         require_evaluation_admin(user)
@@ -83,8 +84,9 @@ def test_evaluation_admin_gate_allows_listed_email(monkeypatch):
     class _Settings:
         ENVIRONMENT = "production"
         EVAL_ADMIN_EMAILS = "admin@example.com"
+        ANALYTICS_ADMIN_EMAILS = ""
 
-    monkeypatch.setattr("app.api.evaluation_routes.get_settings", lambda: _Settings())
+    monkeypatch.setattr("app.core.admin_access.get_settings", lambda: _Settings())
 
     assert require_evaluation_admin(user).email == "admin@example.com"
 

@@ -480,4 +480,51 @@ export function getOAuthStartUrl(provider: "github" | "google", nextPath = "/das
   return `${API_BASE}/auth/${provider}?${params.toString()}`;
 }
 
+export type AnalyticsModelBreakdown = {
+  model: string;
+  tokens: number;
+  calls: number;
+  share_pct: number;
+};
+
+export type AnalyticsDailyTokens = {
+  date: string;
+  tokens: number;
+};
+
+export type AnalyticsOverview = {
+  scope: "user" | "platform";
+  period_days: number;
+  users: {
+    sessions?: number;
+    messages?: number;
+    api_requests?: number;
+    total_users?: number;
+    active_users_24h?: number;
+    active_users_period?: number;
+  };
+  ai: {
+    total_tokens: number;
+    avg_latency_ms: number;
+    model_breakdown: AnalyticsModelBreakdown[];
+    daily_tokens: AnalyticsDailyTokens[];
+    total_chats?: number;
+    total_messages?: number;
+    endpoint_latency?: Array<{ path: string; avg_latency_ms: number; requests: number }>;
+  };
+  rag: {
+    uploads: number;
+    ingestion_runs: number;
+    total_chunks?: number;
+  };
+};
+
+export async function getAnalyticsOverview(token?: string | null, days = 30) {
+  return apiRequest<AnalyticsOverview>(`/analytics/overview?days=${days}`, {}, token);
+}
+
+export async function getPlatformAnalytics(token?: string | null, days = 30) {
+  return apiRequest<AnalyticsOverview>(`/analytics/platform?days=${days}`, {}, token);
+}
+
 export { API_BASE };

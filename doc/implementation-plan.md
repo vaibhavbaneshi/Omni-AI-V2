@@ -177,18 +177,15 @@ flowchart TD
 
 ---
 
-## Phase 6 — Analytics Dashboard
+## Phase 6 — Analytics Dashboard ✅
 
-### Current state
-Mock dashboard at `frontend/app/dashboard/page.tsx`.
+**Status:** Implemented (2026-05-30)
 
-### Work items
-1. `GET /analytics/overview` — aggregate from `api_usage`, `model_usage`, `token_usage`
-2. `GET /analytics/users`, `/analytics/rag` sub-endpoints
-3. Frontend: Recharts, replace mock data
-4. Admin gate (env `ADMIN_EMAILS` or role column)
-
-### Depends on Phase 1 tables.
+- `GET /analytics/overview`, `/platform`, `/users`, `/rag`
+- `analytics_service.py` — PostgreSQL aggregation
+- `admin_access.py` — shared admin gate
+- Frontend `/dashboard` with Recharts
+- Docs: `doc/analytics/dashboard.md`
 
 ---
 

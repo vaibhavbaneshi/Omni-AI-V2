@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.core.app_settings import get_settings
+from app.core.admin_access import user_has_admin_access
 from app.core.security import get_current_user
 from app.models.user import User
 from evaluation.runner import run_evaluation
@@ -33,16 +33,7 @@ class EvaluationRunRequest(BaseModel):
 
 
 def _user_can_run_evaluation(user: User) -> bool:
-    settings = get_settings()
-    allowed = [
-        email.strip().lower()
-        for email in settings.EVAL_ADMIN_EMAILS.split(",")
-        if email.strip()
-    ]
-    # Development/staging: open to authenticated users when no admin list is configured.
-    if not allowed:
-        return settings.ENVIRONMENT != "production"
-    return user.email.strip().lower() in allowed
+    return user_has_admin_access(user)
 
 
 def require_evaluation_admin(current_user: User = Depends(get_current_user)) -> User:
