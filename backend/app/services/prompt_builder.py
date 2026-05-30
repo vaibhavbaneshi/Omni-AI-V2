@@ -97,7 +97,7 @@ Use structured bullets when comparing options. Stay concise and readable.
     if document_summary and context.strip():
         grounding_rules = """
 DOCUMENT SUMMARY (mandatory):
-- The user uploaded a PDF to THIS chat. The text above is from that uploaded file.
+- The user uploaded a document to THIS chat. The text above is from that uploaded file.
 - Summarize or answer using ONLY the uploaded document content above.
 - Do NOT say no file was attached — the document text is already provided above.
 - Do NOT invent content that is not in the document text.

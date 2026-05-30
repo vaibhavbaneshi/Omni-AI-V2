@@ -1,4 +1,5 @@
 import os
+import time
 
 from fastapi import (
     APIRouter,
@@ -8,16 +9,19 @@ from fastapi import (
     Depends
 )
 
+from app.services.document_loaders import DocumentLoadError
 from app.services.documents_services import (
     process_document,
-    collection
+    collection,
 )
 
 from app.core.security import (
     get_current_user
 )
 from app.core.app_settings import get_settings
-from app.core.upload_validation import validate_pdf_upload
+from app.core.upload_validation import validate_document_upload
+from app.core.telemetry import traced_span
+from app.services.usage_tracking_service import record_ingestion_event
 from app.db.session import get_db
 from app.models.document import DocumentCollection, DocumentRecord
 from app.models.user import User
@@ -26,7 +30,6 @@ from sqlalchemy.orm import Session
 router = APIRouter()
 
 UPLOAD_DIR = "uploads"
-ALLOWED_EXTENSIONS = {".pdf"}
 
 @router.post("/upload")
 
@@ -38,7 +41,7 @@ async def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    await validate_pdf_upload(file, max_bytes=get_settings().MAX_UPLOAD_BYTES)
+    await validate_document_upload(file, max_bytes=get_settings().MAX_UPLOAD_BYTES)
 
     if session_id is not None:
         from app.models.chat_session import ChatSession
@@ -126,21 +129,46 @@ async def upload_document(
     db.commit()
     db.refresh(document)
 
+    ingest_started = time.perf_counter()
     try:
-
-        chunk_count = process_document(
-            file_path=file_path,
-            filename=safe_name,
+        with traced_span(
+            "document.ingest",
             user_id=current_user.id,
-            workspace_id=workspace_id,
-            collection_id=collection_record.id,
+            filename=safe_name,
             session_id=session_id,
-            document_id=document.id
-        )
+        ):
+            chunk_count = process_document(
+                file_path=file_path,
+                filename=safe_name,
+                user_id=current_user.id,
+                workspace_id=workspace_id,
+                collection_id=collection_record.id,
+                session_id=session_id,
+                document_id=document.id
+            )
 
         document.chunks_created = chunk_count
         db.commit()
+        record_ingestion_event(
+            user_id=current_user.id,
+            filename=safe_name,
+            chunks_created=chunk_count,
+            duration_ms=round((time.perf_counter() - ingest_started) * 1000, 2),
+            success=True,
+        )
 
+    except DocumentLoadError as e:
+        record_ingestion_event(
+            user_id=current_user.id,
+            filename=safe_name,
+            chunks_created=0,
+            duration_ms=round((time.perf_counter() - ingest_started) * 1000, 2),
+            success=False,
+            error_message=str(e),
+        )
+        db.delete(document)
+        db.commit()
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         db.delete(document)
         db.commit()

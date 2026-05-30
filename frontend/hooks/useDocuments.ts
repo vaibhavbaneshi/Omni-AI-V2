@@ -9,6 +9,10 @@ import {
   type DocumentRecord,
 } from "@/lib/api";
 import { isBackendSessionId } from "@/lib/chat-sessions";
+import {
+  isSupportedUploadFilename,
+  SUPPORTED_UPLOADS_LABEL,
+} from "@/lib/supported-uploads";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
@@ -57,6 +61,12 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     const sessionId = options?.sessionId ?? numericSessionId;
     if (!sessionId) {
       const errorMessage = "Start or select a chat before uploading a document.";
+      setStatus("error");
+      setMessage(errorMessage);
+      throw new Error(errorMessage);
+    }
+    if (!isSupportedUploadFilename(file.name)) {
+      const errorMessage = `Unsupported file type. Supported formats: ${SUPPORTED_UPLOADS_LABEL}.`;
       setStatus("error");
       setMessage(errorMessage);
       throw new Error(errorMessage);

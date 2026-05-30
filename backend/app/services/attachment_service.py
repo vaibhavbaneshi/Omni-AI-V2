@@ -24,7 +24,7 @@ MATH_EXPRESSION = re.compile(
 
 NO_DOCUMENT_MESSAGE = (
     "I could not find an uploaded document attached to this session. "
-    "Please upload a PDF to this chat, then ask again."
+    "Please upload a file to this chat, then ask again."
 )
 
 

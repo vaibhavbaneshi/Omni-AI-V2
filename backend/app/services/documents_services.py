@@ -1,87 +1,21 @@
 import os
 import uuid
 
-from pypdf import PdfReader
-
-from sentence_transformers import (
-    SentenceTransformer
-)
-
-from langchain.text_splitter import (
-    RecursiveCharacterTextSplitter
-)
+from sentence_transformers import SentenceTransformer
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from app.core.config import settings
 from app.core.chroma_client import get_or_create_collection
+from app.services.document_loaders import load_document
 
-# -----------------------------------
-# EMBEDDING MODEL
-# -----------------------------------
-
-embedding_model = SentenceTransformer(
-    "BAAI/bge-small-en-v1.5"
-)
-
-# -----------------------------------
-# CHROMADB
-# -----------------------------------
-
+embedding_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
 collection = get_or_create_collection(settings.COLLECTION_NAME)
 
-# -----------------------------------
-# LOAD PDF
-# -----------------------------------
-
-from pypdf.errors import PdfStreamError
-
-def load_pdf(file_path: str):
-
-    try:
-
-        reader = PdfReader(file_path)
-
-        text = ""
-
-        for page in reader.pages:
-
-            extracted = page.extract_text()
-
-            if extracted:
-
-                text += extracted
-
-        return text
-
-    except PdfStreamError:
-
-        raise Exception(
-            "Invalid or corrupted PDF file."
-        )
-
-    except Exception as e:
-
-        raise Exception(
-            f"PDF processing failed: {str(e)}"
-        )
-
-# -----------------------------------
-# CHUNK TEXT
-# -----------------------------------
 
 def chunk_text(text: str):
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    return splitter.split_text(text)
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=100
-    )
-
-    chunks = splitter.split_text(text)
-
-    return chunks
-
-# -----------------------------------
-# STORE CHUNKS
-# -----------------------------------
 
 def store_chunks(
     chunks,
@@ -90,17 +24,11 @@ def store_chunks(
     workspace_id="default",
     collection_id=None,
     session_id=None,
-    document_id=None
+    document_id=None,
 ):
+    embeddings = embedding_model.encode(chunks).tolist()
 
-    embeddings = embedding_model.encode(
-        chunks
-    ).tolist()
-
-    ids = [
-        str(uuid.uuid4())
-        for _ in chunks
-    ]
+    ids = [str(uuid.uuid4()) for _ in chunks]
 
     metadatas = [
         {
@@ -112,7 +40,7 @@ def store_chunks(
             "session_id": str(session_id or ""),
             "document_id": str(document_id or ""),
             "chunk_index": index,
-            "embedding_version": "bge-small-en-v1.5"
+            "embedding_version": "bge-small-en-v1.5",
         }
         for index, _ in enumerate(chunks)
     ]
@@ -121,12 +49,9 @@ def store_chunks(
         documents=chunks,
         embeddings=embeddings,
         ids=ids,
-        metadatas=metadatas
+        metadatas=metadatas,
     )
 
-# -----------------------------------
-# COMPLETE INGESTION
-# -----------------------------------
 
 def process_document(
     file_path: str,
@@ -135,11 +60,9 @@ def process_document(
     workspace_id: str = "default",
     collection_id: int | None = None,
     session_id: int | None = None,
-    document_id: int | None = None
+    document_id: int | None = None,
 ):
-
-    text = load_pdf(file_path)
-
+    text = load_document(file_path)
     chunks = chunk_text(text)
 
     store_chunks(
@@ -149,7 +72,7 @@ def process_document(
         workspace_id=workspace_id,
         collection_id=collection_id,
         session_id=session_id,
-        document_id=document_id
+        document_id=document_id,
     )
 
     return len(chunks)

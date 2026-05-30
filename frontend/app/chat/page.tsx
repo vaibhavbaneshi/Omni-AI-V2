@@ -31,6 +31,7 @@ import {
   Share,
   ArrowUp,
   Mic,
+  Square,
   Hash,
   Folder,
   Star,
@@ -58,6 +59,7 @@ import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
 import {
   ApiError,
   createChatSession,
+  deleteChatSession,
   getChatSessionMessages,
   listChatSessions,
   updateChatSessionTitle,
@@ -68,6 +70,12 @@ import {
 import { useChatStream } from "@/hooks/useChatStream";
 import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 import { isBackendSessionId } from "@/lib/chat-sessions";
+import {
+  isSupportedUploadFilename,
+  stripUploadExtension,
+  SUPPORTED_UPLOADS_LABEL,
+  UPLOAD_ACCEPT,
+} from "@/lib/supported-uploads";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useMemory } from "@/hooks/useMemory";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -196,6 +204,7 @@ export default function ChatPage() {
     streamError,
     setStreamError,
     start: startChatStream,
+    cancel: cancelChatStream,
   } = useChatStream();
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -416,6 +425,10 @@ export default function ChatPage() {
         onTitle: applyTitleUpdate,
       });
 
+      if (streamResult.cancelled) {
+        return;
+      }
+
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
@@ -523,7 +536,15 @@ export default function ChatPage() {
     setActiveChat((prev) => (prev?.id === chatId ? update(prev) : prev));
   };
 
-  const handleDeleteChat = (chatId: string) => {
+  const handleDeleteChat = async (chatId: string) => {
+    if (isBackendSessionId(chatId)) {
+      try {
+        await deleteChatSession(Number(chatId), session?.token);
+      } catch {
+        // still remove locally if backend already deleted
+      }
+    }
+
     const remainingChats = chats.filter((c) => c.id !== chatId);
     setChats(remainingChats);
     if (activeChat?.id === chatId) {
@@ -638,10 +659,10 @@ export default function ChatPage() {
   const processSelectedFile = async (file: File) => {
     if (!file) return;
 
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
+    if (!isSupportedUploadFilename(file.name)) {
       setAttachedFile(null);
       setUploadStatus("error");
-      setUploadMessage("Only PDF documents are supported.");
+      setUploadMessage(`Unsupported file type. Supported formats: ${SUPPORTED_UPLOADS_LABEL}.`);
       return;
     }
 
@@ -657,7 +678,7 @@ export default function ChatPage() {
     setUploadMessage(null);
 
     try {
-      const chat = await ensureBackendChat(file.name.replace(/\.pdf$/i, ""));
+      const chat = await ensureBackendChat(stripUploadExtension(file.name));
       await uploadWorkspaceDocument(file, { sessionId: Number(chat.id) });
     } catch (error) {
       setUploadStatus("error");
@@ -1320,7 +1341,7 @@ export default function ChatPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,application/pdf"
+              accept={UPLOAD_ACCEPT}
               className="hidden"
               onChange={handleFileSelected}
             />
@@ -1383,12 +1404,12 @@ export default function ChatPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-[12px] font-medium text-foreground/85">
-                      Drop PDFs to attach to this chat
+                      Drop files to attach to this chat
                     </p>
                     <p className="truncate text-[11px] text-muted-foreground/55">
                       {documents.length > 0
                         ? `${documents.length} file${documents.length === 1 ? "" : "s"} in this chat`
-                        : "PDFs uploaded here are scoped to this conversation"}
+                        : `Supported: ${SUPPORTED_UPLOADS_LABEL}. Files are scoped to this conversation.`}
                     </p>
                   </div>
                 </button>
@@ -1499,11 +1520,18 @@ export default function ChatPage() {
                   </Tooltip>
                   <Button
                     size="icon"
-                    className={`size-8 rounded-lg transition-all duration-300 ${input.trim() && !isStreaming ? "glow-primary bg-primary text-primary-foreground hover:bg-primary/90" : "bg-white/5 text-muted-foreground/50"}`}
-                    onClick={() => handleSend()}
-                    disabled={!input.trim() || isStreaming}
+                    className={`size-8 rounded-lg transition-all duration-300 ${
+                      isStreaming
+                        ? "bg-destructive/20 text-destructive hover:bg-destructive/30"
+                        : input.trim()
+                        ? "glow-primary bg-primary text-primary-foreground hover:bg-primary/90"
+                        : "bg-white/5 text-muted-foreground/50"
+                    }`}
+                    onClick={() => (isStreaming ? cancelChatStream() : handleSend())}
+                    disabled={!isStreaming && !input.trim()}
+                    aria-label={isStreaming ? "Stop generating" : "Send message"}
                   >
-                    <ArrowUp className="size-4" />
+                    {isStreaming ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
                   </Button>
                 </div>
               </div>
