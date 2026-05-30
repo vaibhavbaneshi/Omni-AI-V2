@@ -151,22 +151,17 @@ flowchart TD
 
 ---
 
-## Phase 4 — RAG Evaluation Pipeline
+## Phase 4 — RAG Evaluation Pipeline ✅
 
-### Current state
-**Partial.** Root `eval/rag_eval.py`, `eval/orchestration_eval.py`, CI smoke job.
+**Status:** Implemented (2026-05-30)
 
-### Work items
-1. Move to `backend/evaluation/` (or keep root + add API)
-2. Install `ragas`, `deepeval` in `requirements-dev.txt` (already listed)
-3. Add `POST /evaluation/run` (admin-gated)
-4. JSON + CSV report export
-5. Expand `eval/benchmark_dataset.json`
-
-### Affected files
-- `backend/evaluation/*` *(new package)*
-- `backend/app/api/evaluation_routes.py` *(new)*
-- `eval/*` — consolidate or alias
+- Package: `backend/evaluation/` (metrics, runner, exporters, sample dataset)
+- API: `POST /evaluation/run`, `GET /evaluation/datasets/sample`
+- Metrics: faithfulness, answer relevancy, context precision/recall, hallucination, response quality
+- Engines: RAGAS → DeepEval → heuristic fallback
+- Reports: JSON + CSV in `eval/reports/`
+- Docs: `doc/evaluation/rag-evaluation.md`
+- Admin gate: `EVAL_ADMIN_EMAILS` in production
 
 ---
 

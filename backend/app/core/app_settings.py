@@ -78,6 +78,9 @@ class AppSettings(BaseSettings):
     # Persist API/model/token metrics to PostgreSQL (Phase 1 observability).
     ENABLE_USAGE_TRACKING: bool = True
 
+    # Phase 4 — comma-separated admin emails allowed to POST /evaluation/run in production.
+    EVAL_ADMIN_EMAILS: str = ""
+
     ENABLE_DEEP_RESEARCH: bool = False
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 

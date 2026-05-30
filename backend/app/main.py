@@ -18,6 +18,7 @@ from app.api.upload_routes import router as upload_router
 from app.api.session_routes import router as session_router
 from app.api.oauth_routes import router as oauth_router
 from app.api.memory_routes import router as memory_router
+from app.api.evaluation_routes import router as evaluation_router
 from app.middleware.production import (
     InMemoryRateLimitMiddleware,
     SecurityHeadersMiddleware,
@@ -108,3 +109,4 @@ app.include_router(upload_router)
 app.include_router(session_router)
 app.include_router(oauth_router)
 app.include_router(memory_router)
+app.include_router(evaluation_router)

@@ -1,0 +1,49 @@
+[
+  {
+    "id": "rag-001",
+    "question": "What is the refund policy for annual subscriptions?",
+    "ground_truth": "Annual subscriptions can be refunded within 14 days.",
+    "contexts": [
+      "Annual subscriptions can be refunded within 14 days of purchase.",
+      "Monthly plans are non-refundable after billing."
+    ],
+    "sample_answer": "Annual subscriptions can be refunded within 14 days of purchase.",
+    "expected_tools": ["retrieval"]
+  },
+  {
+    "id": "rag-002",
+    "question": "Summarize the onboarding checklist for enterprise tenants.",
+    "ground_truth": "Enterprise onboarding includes SSO setup, workspace provisioning, and admin training.",
+    "contexts": [
+      "Enterprise onboarding checklist: configure SSO, create workspace, assign admins, schedule training."
+    ],
+    "sample_answer": "Enterprise onboarding includes SSO configuration, workspace creation, admin assignment, and training.",
+    "expected_tools": ["retrieval", "summarizer"]
+  },
+  {
+    "id": "rag-003",
+    "question": "What security controls are required before production launch?",
+    "ground_truth": "Production launch requires MFA, audit logging, and encrypted backups.",
+    "contexts": [
+      "Pre-production security gate: enforce MFA for all admins, enable audit logging, verify encrypted backups."
+    ],
+    "sample_answer": "Before production launch you need MFA, audit logging, and encrypted backups.",
+    "expected_tools": ["retrieval"]
+  },
+  {
+    "id": "orch-001",
+    "type": "orchestration-only",
+    "question": "What is 15 percent of 240?",
+    "ground_truth": "36",
+    "contexts": [],
+    "expected_tools": ["calculator"]
+  },
+  {
+    "id": "orch-002",
+    "type": "orchestration-only",
+    "question": "Summarize the attached PDF file in this chat.",
+    "ground_truth": "Document summary unavailable without upload.",
+    "contexts": [],
+    "expected_tools": ["retrieval"]
+  }
+]

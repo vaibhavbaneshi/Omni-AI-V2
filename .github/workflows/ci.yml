@@ -49,11 +49,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Run heuristic RAG eval smoke
+      - name: Run unified evaluation smoke
         working-directory: backend
         run: |
           pip install -r requirements.txt
-          python ../eval/rag_eval.py --dataset ../eval/benchmark_dataset.json --output ../eval/reports
+          python -c "from evaluation.runner import run_evaluation; run_evaluation(engine_preference='heuristic')"
       - name: Run orchestration eval smoke
         working-directory: backend
         run: python ../eval/orchestration_eval.py --dataset ../eval/benchmark_dataset.json --output ../eval/reports
