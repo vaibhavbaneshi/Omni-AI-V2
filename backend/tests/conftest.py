@@ -20,6 +20,9 @@ os.environ.setdefault("GROQ_API_KEY", "test-key")
 os.environ.setdefault("ENABLE_USAGE_TRACKING", "false")
 os.environ.setdefault("INGEST_IN_BACKGROUND", "false")
 os.environ.setdefault("PRELOAD_EMBEDDING_MODEL", "false")
+os.environ.setdefault("ENABLE_RERANKER", "false")
+os.environ.setdefault("EMBEDDING_PROVIDER", "openai")
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 
 from app.db.database import Base
 from app.db.session import get_db

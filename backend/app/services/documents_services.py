@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import uuid
@@ -79,7 +80,7 @@ def store_chunks(
                 "session_id": str(session_id or ""),
                 "document_id": str(document_id or ""),
                 "chunk_index": start + index,
-                "embedding_version": settings.EMBEDDING_MODEL,
+                "embedding_version": settings.embedding_model_label,
             }
             for index, _ in enumerate(batch)
         ]
@@ -89,6 +90,8 @@ def store_chunks(
             ids=ids,
             metadatas=metadatas,
         )
+        del embeddings, batch, ids, metadatas
+        gc.collect()
 
 
 def process_document(
@@ -101,7 +104,17 @@ def process_document(
     document_id: int | None = None,
 ):
     text = load_document(file_path)
+    settings = get_settings()
+    if len(text) > settings.MAX_INGEST_TEXT_CHARS:
+        logger.warning(
+            "Truncating document text from %s to %s chars (MAX_INGEST_TEXT_CHARS)",
+            len(text),
+            settings.MAX_INGEST_TEXT_CHARS,
+        )
+        text = text[: settings.MAX_INGEST_TEXT_CHARS]
+
     chunks = chunk_text(text)
+    del text
     if not chunks:
         raise ValueError("No indexable text chunks were produced from the document.")
 

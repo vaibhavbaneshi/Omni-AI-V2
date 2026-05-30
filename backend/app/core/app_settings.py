@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["development", "staging", "production"]
 LLMProviderName = Literal["groq", "openai", "ollama"]
+EmbeddingProviderName = Literal["local", "openai", "huggingface"]
 
 
 def _normalize_database_url(url: str) -> str:
@@ -63,14 +64,25 @@ class AppSettings(BaseSettings):
     CHROMA_DB_PATH: str = "./chroma_db"
     COLLECTION_NAME: str = "omniai_docs"
 
+    # local = PyTorch + SentenceTransformer (~1GB+ RAM). Use openai/huggingface on Railway.
+    EMBEDDING_PROVIDER: EmbeddingProviderName = "local"
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    HUGGINGFACE_API_KEY: str = ""
+    HF_TOKEN: str = ""
+    # Set true only on machines with >=2GB RAM and requirements-local-ml.txt installed.
+    ENABLE_LOCAL_ML: bool = False
     EMBEDDING_BATCH_SIZE: int = 64
     INGEST_CHUNK_SIZE: int = 1200
     INGEST_CHUNK_OVERLAP: int = 150
     INGEST_MAX_CHUNKS: int = 400
+    # Cap extracted text before chunking to limit peak RAM during ingest.
+    MAX_INGEST_TEXT_CHARS: int = 600_000
     CHROMA_ADD_BATCH_SIZE: int = 128
     PRELOAD_EMBEDDING_MODEL: bool = True
     INGEST_IN_BACKGROUND: bool = True
+    # CrossEncoder reranker adds ~300MB RAM — disable on memory-constrained deploys.
+    ENABLE_RERANKER: bool = True
 
     DATABASE_URL: str = ""
     POSTGRES_HOST: str = "localhost"
@@ -145,6 +157,20 @@ class AppSettings(BaseSettings):
         return "chroma"
 
     @property
+    def huggingface_api_key(self) -> str:
+        return self.HUGGINGFACE_API_KEY.strip() or self.HF_TOKEN.strip()
+
+    @property
+    def uses_local_ml(self) -> bool:
+        return self.EMBEDDING_PROVIDER == "local" or self.ENABLE_RERANKER
+
+    @property
+    def embedding_model_label(self) -> str:
+        if self.EMBEDDING_PROVIDER == "openai":
+            return self.OPENAI_EMBEDDING_MODEL
+        return self.EMBEDDING_MODEL
+
+    @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
@@ -169,6 +195,28 @@ class AppSettings(BaseSettings):
             if self.LLM_PROVIDER == "openai" and not self.OPENAI_API_KEY.strip():
                 raise RuntimeError(
                     "OPENAI_API_KEY must be set when LLM_PROVIDER=openai in production."
+                )
+            if self.EMBEDDING_PROVIDER == "openai" and not self.OPENAI_API_KEY.strip():
+                raise RuntimeError(
+                    "OPENAI_API_KEY must be set when EMBEDDING_PROVIDER=openai in production."
+                )
+            if self.EMBEDDING_PROVIDER == "huggingface" and not self.huggingface_api_key:
+                raise RuntimeError(
+                    "HUGGINGFACE_API_KEY or HF_TOKEN must be set when "
+                    "EMBEDDING_PROVIDER=huggingface in production."
+                )
+            if self.EMBEDDING_PROVIDER == "local" and not self.ENABLE_LOCAL_ML:
+                raise RuntimeError(
+                    "EMBEDDING_PROVIDER=local is disabled in production. "
+                    "Set EMBEDDING_PROVIDER=openai or huggingface (recommended), or set "
+                    "ENABLE_LOCAL_ML=true with requirements-local-ml.txt and >=2GB RAM."
+                )
+            if self.ENABLE_RERANKER:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "ENABLE_RERANKER=true loads CrossEncoder (~300MB). "
+                    "Set ENABLE_RERANKER=false on memory-constrained deploys."
                 )
 
 

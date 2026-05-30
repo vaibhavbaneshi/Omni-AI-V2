@@ -2,6 +2,7 @@ FROM python:3.11-slim AS backend
 
 WORKDIR /app/backend
 
+# build-essential only needed if a wheel is missing; prod image has no PyTorch.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*

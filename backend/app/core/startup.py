@@ -16,4 +16,6 @@ def log_startup_diagnostics(settings: AppSettings) -> None:
     logger.info("LLM Model: %s", settings.llm_model_name)
     logger.info("Database: %s", settings.database_mode)
     logger.info("Vector Store: %s", settings.vector_store_mode)
+    logger.info("Embedding provider: %s (%s)", settings.EMBEDDING_PROVIDER, settings.embedding_model_label)
+    logger.info("Local ML in process: %s", settings.uses_local_ml)
     logger.info("Chroma path: %s", settings.CHROMA_DB_PATH)

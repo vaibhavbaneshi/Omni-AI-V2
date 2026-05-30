@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
         )
     startup = run_startup_checks()
     logger.info("Startup complete: %s", startup.get("status"))
-    if settings.PRELOAD_EMBEDDING_MODEL:
+    if settings.PRELOAD_EMBEDDING_MODEL and settings.EMBEDDING_PROVIDER == "local":
         import threading
 
         threading.Thread(

@@ -1,0 +1,4 @@
+# Optional — only for local dev when EMBEDDING_PROVIDER=local or ENABLE_RERANKER=true
+-r requirements.txt
+torch==2.7.1
+sentence-transformers==3.1.1
