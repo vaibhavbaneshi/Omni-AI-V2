@@ -1,13 +1,6 @@
 import re
 
-import requests
-
-from app.core.config import settings
-from app.core.ollama import (
-    raise_ollama_http_error,
-    resolve_ollama_generate_url,
-    resolve_ollama_model_name,
-)
+from app.core.llm import get_llm_provider
 
 
 def _clean_title(raw: str, *, fallback: str = "New Chat") -> str:
@@ -20,26 +13,11 @@ def _clean_title(raw: str, *, fallback: str = "New Chat") -> str:
 
 
 def _generate_title(prompt: str, *, fallback: str) -> str:
-    ollama_url = settings.OLLAMA_URL or resolve_ollama_generate_url("http://localhost:11434")
-    model = resolve_ollama_model_name(settings.MODEL_NAME, ollama_url)
-
     try:
-        response = requests.post(
-            ollama_url,
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.2},
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return _clean_title(data.get("response", ""), fallback=fallback)
-    except requests.HTTPError as exc:
-        raise_ollama_http_error(exc, generate_url=ollama_url, model=model)
-    except requests.RequestException:
+        provider = get_llm_provider()
+        response = provider.generate(prompt, temperature=0.2, timeout=30)
+        return _clean_title(response, fallback=fallback)
+    except Exception:
         return fallback
 
 

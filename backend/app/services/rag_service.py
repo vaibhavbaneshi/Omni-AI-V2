@@ -1,5 +1,3 @@
-import chromadb
-import requests
 import logging
 
 from sentence_transformers import (
@@ -7,7 +5,8 @@ from sentence_transformers import (
 )
 
 from app.core.config import settings
-from app.core.ollama import raise_ollama_http_error, resolve_ollama_model_name
+from app.core.chroma_client import get_or_create_collection
+from app.core.llm import get_llm_provider
 from app.services.prompt_builder import build_stream_prompt
 
 from app.services.reranker_service import (
@@ -19,8 +18,6 @@ logger = logging.getLogger(__name__)
 from app.services.conversation_service import (
     get_chat_history
 )
-
-import json
 
 # -----------------------------------
 # EMBEDDING MODEL
@@ -34,14 +31,7 @@ embedding_model = SentenceTransformer(
 # CHROMADB
 # -----------------------------------
 
-client = chromadb.PersistentClient(
-    path=settings.CHROMA_DB_PATH
-)
-
-try:
-    collection = client.get_collection(name=settings.COLLECTION_NAME)
-except Exception:
-    collection = client.create_collection(name=settings.COLLECTION_NAME)
+collection = get_or_create_collection(settings.COLLECTION_NAME)
 
 # -----------------------------------
 # RETRIEVE CONTEXT
@@ -276,41 +266,8 @@ def generate_response(
         mode="research",
     )
 
-    ollama_url = settings.OLLAMA_URL
-    if not ollama_url:
-        raise RuntimeError(
-            "OLLAMA_URL is not configured. Set OLLAMA_URL to your Ollama base URL "
-            "(e.g. http://localhost:11434) or full generate URL."
-        )
-
-    model = resolve_ollama_model_name(settings.MODEL_NAME, ollama_url)
-
-    try:
-        response = requests.post(
-            ollama_url,
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.35,
-                },
-            },
-            timeout=120
-        )
-        response.raise_for_status()
-    except requests.HTTPError as exc:
-        raise_ollama_http_error(exc, generate_url=ollama_url, model=model)
-    except requests.RequestException as exc:
-        logger.exception("Error contacting model server at %s", ollama_url)
-        raise RuntimeError(
-            f"Failed to contact model server at {ollama_url}: {exc}. "
-            "Ensure Ollama is running (`ollama serve`)."
-        ) from exc
-
-    data = response.json()
-
-    return data.get("response", "")
+    provider = get_llm_provider()
+    return provider.generate(prompt, temperature=0.35, timeout=120)
 
 # -----------------------------------
 # COMPLETE RAG PIPELINE
@@ -358,47 +315,5 @@ def stream_response(
         document_summary=document_summary,
     )
 
-    ollama_url = settings.OLLAMA_URL
-    if not ollama_url:
-        raise RuntimeError(
-            "OLLAMA_URL is not configured. Set OLLAMA_URL to your Ollama base URL "
-            "(e.g. http://localhost:11434) or full generate URL."
-        )
-
-    model = resolve_ollama_model_name(settings.MODEL_NAME, ollama_url)
-
-    try:
-        response = requests.post(
-            ollama_url,
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": True,
-                "options": {
-                    "temperature": 0.35,
-                },
-            },
-            stream=True,
-            timeout=120
-        )
-        response.raise_for_status()
-    except requests.HTTPError as exc:
-        raise_ollama_http_error(exc, generate_url=ollama_url, model=model)
-    except requests.RequestException as exc:
-        logger.exception("Error contacting model server at %s", ollama_url)
-        raise RuntimeError(
-            f"Failed to contact model server at {ollama_url}: {exc}. "
-            "Ensure Ollama is running (`ollama serve`)."
-        ) from exc
-
-    for line in response.iter_lines():
-        if line:
-            try:
-                data = json.loads(line)
-            except Exception:
-                # ignore malformed lines but log them
-                logger.exception("Failed to parse line from model stream")
-                continue
-
-            token = data.get("response", "")
-            yield token
+    provider = get_llm_provider()
+    yield from provider.stream_generate(prompt, temperature=0.35, timeout=120)

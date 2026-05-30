@@ -7,13 +7,12 @@ from sentence_transformers import (
     SentenceTransformer
 )
 
-import chromadb
-
 from langchain.text_splitter import (
     RecursiveCharacterTextSplitter
 )
 
 from app.core.config import settings
+from app.core.chroma_client import get_or_create_collection
 
 # -----------------------------------
 # EMBEDDING MODEL
@@ -27,13 +26,7 @@ embedding_model = SentenceTransformer(
 # CHROMADB
 # -----------------------------------
 
-client = chromadb.PersistentClient(
-    path=settings.CHROMA_DB_PATH
-)
-
-collection = client.get_or_create_collection(
-    name=settings.COLLECTION_NAME
-)
+collection = get_or_create_collection(settings.COLLECTION_NAME)
 
 # -----------------------------------
 # LOAD PDF

@@ -9,7 +9,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-with-32-characters-min"
 
 @pytest.fixture
 def client():
-    with patch("app.core.health.check_ollama", return_value={"status": "ok"}):
+    with patch("app.core.health.check_llm", return_value={"status": "ok", "provider": "groq"}):
         with patch("app.core.health.check_chroma", return_value={"status": "ok"}):
             with patch("app.core.health.check_database", return_value={"status": "ok"}):
                 from fastapi.testclient import TestClient

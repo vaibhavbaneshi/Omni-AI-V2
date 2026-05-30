@@ -6,9 +6,9 @@ _settings = get_settings()
 
 
 class Settings:
+    """Lazy facade — no Ollama network calls at import time."""
+
     APP_NAME = _settings.APP_NAME
-    OLLAMA_URL = _settings.ollama_generate_url
-    MODEL_NAME = _settings.resolved_model_name
     CHROMA_DB_PATH = _settings.CHROMA_DB_PATH
     COLLECTION_NAME = _settings.COLLECTION_NAME
     TAVILY_API_KEY = _settings.TAVILY_API_KEY
@@ -19,6 +19,16 @@ class Settings:
     POSTGRES_DB = _settings.POSTGRES_DB
     POSTGRES_USER = _settings.POSTGRES_USER
     POSTGRES_PASSWORD = _settings.POSTGRES_PASSWORD
+    LLM_PROVIDER = _settings.LLM_PROVIDER
+
+    @property
+    def MODEL_NAME(self) -> str:
+        return get_settings().llm_model_name
+
+    @property
+    def OLLAMA_URL(self) -> str:
+        # Kept for backward compatibility in legacy code paths only.
+        return get_settings().OLLAMA_URL
 
 
 settings = Settings()

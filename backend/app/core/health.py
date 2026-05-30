@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import requests
 from sqlalchemy import text
 
 from app.core.app_settings import get_settings
+from app.core.chroma_client import get_or_create_collection
+from app.core.llm import get_llm_provider
 from app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -24,44 +25,49 @@ def check_database() -> dict[str, Any]:
         return {"status": "error", "detail": str(exc)}
 
 
-def check_ollama() -> dict[str, Any]:
+def check_llm(*, probe_network: bool = False) -> dict[str, Any]:
     settings = get_settings()
-    base = settings.ollama_generate_url.rsplit("/api/", 1)[0]
     try:
-        response = requests.get(f"{base}/api/tags", timeout=3)
-        response.raise_for_status()
-        models = [m.get("name") for m in response.json().get("models", [])]
-        resolved = settings.resolved_model_name
-        return {
-            "status": "ok",
-            "model": resolved,
-            "model_available": resolved in models if models else True,
-        }
+        provider = get_llm_provider()
+        return provider.health_check(probe_network=probe_network)
     except Exception as exc:
-        return {"status": "error", "detail": str(exc)}
+        return {
+            "status": "error",
+            "provider": settings.LLM_PROVIDER,
+            "detail": str(exc),
+        }
 
 
 def check_chroma() -> dict[str, Any]:
     settings = get_settings()
     try:
-        import chromadb
-
-        client = chromadb.PersistentClient(path=settings.CHROMA_DB_PATH)
-        client.get_or_create_collection(name=settings.COLLECTION_NAME)
+        get_or_create_collection(settings.COLLECTION_NAME)
         return {"status": "ok", "collection": settings.COLLECTION_NAME}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
 
 
-def run_health_checks() -> dict[str, Any]:
+def run_health_checks(*, probe_llm_network: bool = False) -> dict[str, Any]:
+    settings = get_settings()
     checks = {
         "database": check_database(),
-        "ollama": check_ollama(),
+        "llm": check_llm(probe_network=probe_llm_network),
         "chroma": check_chroma(),
     }
-    overall = (
-        "healthy"
-        if all(item.get("status") == "ok" for item in checks.values())
-        else "degraded"
-    )
-    return {"status": overall, "checks": checks}
+
+    required = {"database", "llm", "chroma"}
+    if settings.LLM_PROVIDER == "groq":
+        # Groq is configured locally; network probe is optional.
+        overall_ok = (
+            checks["database"]["status"] == "ok"
+            and checks["llm"]["status"] == "ok"
+            and checks["chroma"]["status"] == "ok"
+        )
+    else:
+        overall_ok = all(checks[name].get("status") == "ok" for name in required)
+
+    return {
+        "status": "healthy" if overall_ok else "degraded",
+        "provider": settings.LLM_PROVIDER,
+        "checks": checks,
+    }

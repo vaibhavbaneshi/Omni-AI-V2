@@ -9,9 +9,8 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.ollama import resolve_ollama_generate_url, resolve_ollama_model_name
-
 Environment = Literal["development", "staging", "production"]
+LLMProviderName = Literal["groq", "ollama"]
 
 
 class AppSettings(BaseSettings):
@@ -33,6 +32,11 @@ class AppSettings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60
 
+    LLM_PROVIDER: LLMProviderName = "groq"
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
+    # Optional local development provider
     OLLAMA_URL: str = "http://localhost:11434"
     MODEL_NAME: str = "llama3:latest"
 
@@ -72,6 +76,11 @@ class AppSettings(BaseSettings):
     def normalize_env(cls, value: str) -> str:
         return (value or "development").strip().lower()
 
+    @field_validator("LLM_PROVIDER", mode="before")
+    @classmethod
+    def normalize_llm_provider(cls, value: str) -> str:
+        return (value or "groq").strip().lower()
+
     @property
     def database_url(self) -> str:
         return (
@@ -84,18 +93,10 @@ class AppSettings(BaseSettings):
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
     @property
-    def ollama_generate_url(self) -> str:
-        return resolve_ollama_generate_url(self.OLLAMA_URL)
-
-    @property
-    def resolved_model_name(self) -> str:
-        try:
-            return resolve_ollama_model_name(
-                self.MODEL_NAME,
-                self.ollama_generate_url,
-            )
-        except RuntimeError:
-            return self.MODEL_NAME
+    def llm_model_name(self) -> str:
+        if self.LLM_PROVIDER == "groq":
+            return self.GROQ_MODEL
+        return self.MODEL_NAME
 
     def validate_for_runtime(self) -> None:
         if self.ENVIRONMENT == "production":
@@ -105,6 +106,8 @@ class AppSettings(BaseSettings):
                 )
             if len(self.JWT_SECRET_KEY) < 32:
                 raise RuntimeError("JWT_SECRET_KEY should be at least 32 characters in production.")
+            if self.LLM_PROVIDER == "groq" and not self.GROQ_API_KEY.strip():
+                raise RuntimeError("GROQ_API_KEY must be set when LLM_PROVIDER=groq in production.")
 
 
 @lru_cache

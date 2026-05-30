@@ -29,8 +29,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.validate_for_runtime()
     configure_langsmith_env(settings)
-    logger.info("Starting %s (%s)", settings.APP_NAME, settings.ENVIRONMENT)
-    health = run_health_checks()
+    logger.info("Starting %s (%s) llm_provider=%s", settings.APP_NAME, settings.ENVIRONMENT, settings.LLM_PROVIDER)
+    health = run_health_checks(probe_llm_network=False)
     logger.info("Startup health: %s", health.get("status"))
     yield
     logger.info("Shutting down %s", settings.APP_NAME)

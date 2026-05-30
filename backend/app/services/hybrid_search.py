@@ -1,24 +1,17 @@
 from rank_bm25 import BM25Okapi
 
-import chromadb
-
 from sentence_transformers import (
     SentenceTransformer
 )
 
 from app.core.config import settings
+from app.core.chroma_client import get_or_create_collection
 
 # -----------------------------------
 # CHROMADB
 # -----------------------------------
 
-client = chromadb.PersistentClient(
-    path=settings.CHROMA_DB_PATH
-)
-
-collection = client.get_or_create_collection(
-    name=settings.COLLECTION_NAME
-)
+collection = get_or_create_collection(settings.COLLECTION_NAME)
 
 # -----------------------------------
 # EMBEDDING MODEL
