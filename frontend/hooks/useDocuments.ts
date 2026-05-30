@@ -21,6 +21,11 @@ import { sanitizeApiError } from "@/lib/user-facing-errors";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
+function belongsToSession(document: DocumentRecord, sessionId: number | null): boolean {
+  if (!sessionId) return false;
+  return document.session_id === sessionId;
+}
+
 export function useDocuments(token?: string | null, sessionId?: string | null) {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [collections, setCollections] = useState<DocumentCollection[]>([]);
@@ -29,17 +34,22 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     "idle"
   );
   const [message, setMessage] = useState<string | null>(null);
+  const [uploadTargetSessionId, setUploadTargetSessionId] = useState<number | null>(null);
 
   const numericSessionId =
     sessionId && isBackendSessionId(sessionId) ? Number(sessionId) : null;
 
-  const uploadInProgressRef = useRef(false);
+  const currentSessionIdRef = useRef<number | null>(numericSessionId);
   const pollTimerRef = useRef<number | null>(null);
 
+  useEffect(() => {
+    currentSessionIdRef.current = numericSessionId;
+  }, [numericSessionId]);
+
   const refresh = useCallback(async () => {
-    if (!token) {
+    if (!token || !numericSessionId) {
       setDocuments([]);
-      return;
+      return [];
     }
 
     const [documentResult, collectionResult] = await Promise.all([
@@ -47,23 +57,31 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
       listCollections(token),
     ]);
 
-    setDocuments(documentResult.documents);
+    const scopedDocuments = documentResult.documents.filter((document) =>
+      belongsToSession(document, numericSessionId)
+    );
 
+    setDocuments(scopedDocuments);
     setCollections(collectionResult.collections);
 
     if (!activeCollectionId && collectionResult.collections.length > 0) {
       setActiveCollectionId(collectionResult.collections[0].id);
     }
 
-    return documentResult.documents;
+    return scopedDocuments;
   }, [activeCollectionId, numericSessionId, token]);
 
   useEffect(() => {
-    if (uploadInProgressRef.current) return;
-
     setDocuments([]);
     setStatus("idle");
     setMessage(null);
+
+    if (pollTimerRef.current) {
+      window.clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+
+    if (!token || !numericSessionId) return;
 
     const id = window.setTimeout(() => {
       refresh().catch(() => undefined);
@@ -73,13 +91,19 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
   }, [numericSessionId, token, refresh]);
 
   const pollIndexingDocuments = useCallback(async () => {
-    if (!token) return;
+    if (!token || !numericSessionId) return;
 
-    const pending = documents.filter(isDocumentIndexing);
+    const pending = documents.filter(
+      (document) => isDocumentIndexing(document) && belongsToSession(document, numericSessionId)
+    );
     if (pending.length === 0) {
-      if (status === "indexing") {
+      if (status === "indexing" && uploadTargetSessionId === numericSessionId) {
         setStatus("success");
       }
+      return;
+    }
+
+    if (uploadTargetSessionId !== numericSessionId) {
       return;
     }
 
@@ -98,33 +122,53 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     let becameReady = false;
 
     setDocuments((current) =>
-      current.map((document) => {
-        const update = updates.find((item) => item?.id === document.id);
-        if (!update) return document;
-        if (update.status === "ready" || update.chunks_created > 0) {
-          becameReady = true;
-          return {
-            ...document,
-            chunks_created: update.chunks_created,
-            status: "ready" as const,
-          };
-        }
-        return document;
-      })
+      current
+        .filter((document) => belongsToSession(document, numericSessionId))
+        .map((document) => {
+          const update = updates.find((item) => item?.id === document.id);
+          if (!update) return document;
+          if (update.status === "ready" || update.chunks_created > 0) {
+            becameReady = true;
+            return {
+              ...document,
+              chunks_created: update.chunks_created,
+              status: "ready" as const,
+            };
+          }
+          return document;
+        })
     );
 
+    if (currentSessionIdRef.current !== numericSessionId) {
+      return;
+    }
+
     if (becameReady) {
-      const readyCount = documents.filter(isDocumentReady).length + 1;
-      setMessage(`${readyCount} document${readyCount === 1 ? "" : "s"} ready in this chat.`);
+      const readyCount = documents.filter(
+        (document) => isDocumentReady(document) && belongsToSession(document, numericSessionId)
+      ).length;
+      setMessage(`${readyCount || 1} document${readyCount === 1 ? "" : "s"} ready in this chat.`);
       setStatus("success");
+      setUploadTargetSessionId(null);
     } else {
       const names = pending.map((document) => document.filename).join(", ");
       setMessage(`Indexing ${names}...`);
     }
-  }, [documents, status, token]);
+  }, [documents, numericSessionId, status, token, uploadTargetSessionId]);
 
   useEffect(() => {
-    if (!token || documents.every(isDocumentReady)) {
+    if (!token || !numericSessionId || documents.every(isDocumentReady)) {
+      if (pollTimerRef.current) {
+        window.clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      return;
+    }
+
+    const hasPendingForSession = documents.some(
+      (document) => isDocumentIndexing(document) && belongsToSession(document, numericSessionId)
+    );
+    if (!hasPendingForSession) {
       if (pollTimerRef.current) {
         window.clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
@@ -146,11 +190,11 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
         pollTimerRef.current = null;
       }
     };
-  }, [documents, pollIndexingDocuments, token]);
+  }, [documents, numericSessionId, pollIndexingDocuments, token]);
 
   const upload = async (file: File, options?: { sessionId?: number | null }) => {
-    const sessionId = options?.sessionId ?? numericSessionId;
-    if (!sessionId) {
+    const targetSessionId = options?.sessionId ?? numericSessionId;
+    if (!targetSessionId) {
       const errorMessage = "Start or select a chat before uploading a document.";
       setStatus("error");
       setMessage(errorMessage);
@@ -169,9 +213,13 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
       throw new Error(errorMessage);
     }
 
-    uploadInProgressRef.current = true;
-    setStatus("uploading");
-    setMessage(null);
+    setUploadTargetSessionId(targetSessionId);
+
+    const showProgressForTarget = currentSessionIdRef.current === targetSessionId;
+    if (showProgressForTarget) {
+      setStatus("uploading");
+      setMessage(null);
+    }
 
     const validCollectionId =
       activeCollectionId && collections.some((item) => item.id === activeCollectionId)
@@ -181,8 +229,12 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     try {
       const result = await uploadDocument(file, token, {
         collectionId: validCollectionId,
-        sessionId,
+        sessionId: targetSessionId,
       });
+
+      if (currentSessionIdRef.current !== targetSessionId) {
+        return { ...result, indexing: result.indexing ?? result.chunks_created === 0 };
+      }
 
       const latestDocuments = await refresh();
       const uploadedDocument =
@@ -192,14 +244,17 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
           size: file.size,
           updated_at: Date.now() / 1000,
           collection_id: result.collection_id,
-          session_id: sessionId,
+          session_id: targetSessionId,
           chunks_created: result.chunks_created,
           status: result.indexing ? ("indexing" as const) : ("ready" as const),
         };
 
       setDocuments((current) => {
-        const withoutDuplicate = current.filter((document) => document.id !== uploadedDocument.id);
-        return [uploadedDocument, ...withoutDuplicate];
+        const scoped = current.filter(
+          (document) =>
+            belongsToSession(document, targetSessionId) && document.id !== uploadedDocument.id
+        );
+        return [uploadedDocument, ...scoped];
       });
 
       if (result.indexing || uploadedDocument.chunks_created === 0) {
@@ -210,18 +265,20 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
       setStatus("success");
       setMessage(`${result.message} (${result.chunks_created} chunks indexed)`);
+      setUploadTargetSessionId(null);
       return result;
     } catch (error) {
-      setStatus("error");
-      setMessage(
-        sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
-          fallback: "Upload failed. Please try again.",
-          status: error instanceof ApiError ? error.status : undefined,
-        })
-      );
+      if (currentSessionIdRef.current === targetSessionId) {
+        setStatus("error");
+        setMessage(
+          sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
+            fallback: "Upload failed. Please try again.",
+            status: error instanceof ApiError ? error.status : undefined,
+          })
+        );
+      }
+      setUploadTargetSessionId(null);
       throw error;
-    } finally {
-      uploadInProgressRef.current = false;
     }
   };
 
@@ -240,6 +297,10 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
   const readyDocuments = documents.filter(isDocumentReady);
   const indexingDocuments = documents.filter(isDocumentIndexing);
+  const isUploadActiveForSession =
+    uploadTargetSessionId !== null &&
+    uploadTargetSessionId === numericSessionId &&
+    (status === "uploading" || status === "indexing");
 
   return {
     documents,
@@ -250,6 +311,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     setActiveCollectionId,
     status,
     message,
+    isUploadActiveForSession,
     setStatus,
     setMessage,
     refresh,

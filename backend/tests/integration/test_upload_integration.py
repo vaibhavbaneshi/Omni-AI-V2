@@ -35,8 +35,28 @@ def test_upload_rejects_unknown_extension(auth_client, db_session):
     assert response.status_code == 400
 
 
-def test_list_documents_empty(auth_client):
+def test_upload_requires_session_id(auth_client):
+    response = auth_client.post(
+        "/upload",
+        headers=auth_client.auth_headers,
+        files={"file": ("notes.txt", BytesIO(b"Hello."), "text/plain")},
+    )
+    assert response.status_code == 400
+    assert "session_id" in response.json()["detail"].lower()
+
+
+def test_list_documents_requires_session_scope(auth_client, db_session):
     response = auth_client.get("/documents", headers=auth_client.auth_headers)
+    assert response.status_code == 200
+    assert response.json()["documents"] == []
+
+
+def test_list_documents_empty_for_session(auth_client, db_session):
+    session = ChatSessionFactory(user=auth_client.auth_user, title="Empty Chat")
+    response = auth_client.get(
+        f"/documents?session_id={session.id}",
+        headers=auth_client.auth_headers,
+    )
     assert response.status_code == 200
     assert response.json()["documents"] == []
 

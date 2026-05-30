@@ -43,19 +43,24 @@ async def upload_document(
 ):
     await validate_document_upload(file, max_bytes=get_settings().MAX_UPLOAD_BYTES)
 
-    if session_id is not None:
-        from app.models.chat_session import ChatSession
-
-        owned_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
+    if session_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id is required — documents must belong to a chat session.",
         )
-        if not owned_session:
-            raise HTTPException(status_code=404, detail="Session not found")
+
+    from app.models.chat_session import ChatSession
+
+    owned_session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.id == session_id,
+            ChatSession.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not owned_session:
+        raise HTTPException(status_code=404, detail="Session not found")
 
     collection_record = None
 
@@ -99,7 +104,8 @@ async def upload_document(
     user_upload_dir = os.path.join(
         UPLOAD_DIR,
         str(current_user.id),
-        workspace_id
+        workspace_id,
+        str(session_id),
     )
 
     os.makedirs(user_upload_dir, exist_ok=True)
@@ -208,19 +214,20 @@ def list_documents(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if session_id is None:
+        return {"documents": []}
+
     query = (
         db.query(DocumentRecord)
         .filter(
             DocumentRecord.user_id == current_user.id,
             DocumentRecord.workspace_id == workspace_id,
+            DocumentRecord.session_id == session_id,
         )
     )
 
     if collection_id is not None:
         query = query.filter(DocumentRecord.collection_id == collection_id)
-
-    if session_id is not None:
-        query = query.filter(DocumentRecord.session_id == session_id)
 
     records = query.order_by(DocumentRecord.created_at.desc()).all()
 

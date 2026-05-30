@@ -227,6 +227,7 @@ export default function ChatPage() {
     setActiveCollectionId,
     status: uploadStatus,
     message: uploadMessage,
+    isUploadActiveForSession,
     setStatus: setUploadStatus,
     setMessage: setUploadMessage,
     refresh: refreshDocuments,
@@ -254,6 +255,24 @@ export default function ChatPage() {
     },
     [closeSidebar, isDesktop, setUploadMessage, setUploadStatus]
   );
+
+  const handleNewChat = () => {
+    setAttachedFile(null);
+    setUploadStatus("idle");
+    setUploadMessage(null);
+    const newChat: Chat = {
+      id: `local-${Date.now()}`,
+      title: "New Chat",
+      lastMessage: "",
+      timestamp: new Date(),
+      messages: [],
+    };
+    setChats([newChat, ...chats]);
+    setActiveChat(newChat);
+    if (!isDesktop) {
+      closeSidebar();
+    }
+  };
 
   useEffect(() => {
     activeChatIdRef.current = activeChat?.id ?? null;
@@ -496,21 +515,6 @@ export default function ChatPage() {
     }
   };
 
-  const handleNewChat = () => {
-    const newChat: Chat = {
-      id: `local-${Date.now()}`,
-      title: "New Chat",
-      lastMessage: "",
-      timestamp: new Date(),
-      messages: [],
-    };
-    setChats([newChat, ...chats]);
-    setActiveChat(newChat);
-    if (!isDesktop) {
-      closeSidebar();
-    }
-  };
-
   const handleRenameChat = async (chatId: string) => {
     const chat = chats.find((item) => item.id === chatId);
     const nextTitle = window.prompt("Rename chat", chat?.title || "New Chat")?.trim();
@@ -680,13 +684,36 @@ export default function ChatPage() {
       return;
     }
 
+    let targetChat: Chat;
+    try {
+      targetChat = await ensureBackendChat(stripUploadExtension(file.name));
+    } catch (error) {
+      setUploadStatus("error");
+      setUploadMessage(
+        sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
+          fallback: "Could not start a chat for this upload.",
+          status: error instanceof ApiError ? error.status : undefined,
+        })
+      );
+      return;
+    }
+
+    const targetSessionId = Number(targetChat.id);
+    const lockedChatId = targetChat.id;
+
+    if (activeChatIdRef.current !== lockedChatId) {
+      return;
+    }
+
     setAttachedFile(file);
     setUploadMessage(null);
 
     try {
-      const chat = await ensureBackendChat(stripUploadExtension(file.name));
-      await uploadWorkspaceDocument(file, { sessionId: Number(chat.id) });
+      await uploadWorkspaceDocument(file, { sessionId: targetSessionId });
     } catch (error) {
+      if (activeChatIdRef.current !== lockedChatId) {
+        return;
+      }
       setUploadStatus("error");
       setUploadMessage(
         sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
@@ -695,7 +722,9 @@ export default function ChatPage() {
         })
       );
     } finally {
-      setAttachedFile(null);
+      if (activeChatIdRef.current === lockedChatId) {
+        setAttachedFile(null);
+      }
     }
   };
 
@@ -1417,10 +1446,10 @@ export default function ChatPage() {
                   type="button"
                   className="flex min-w-0 items-center gap-3 text-left"
                   onClick={handleAttachmentClick}
-                  disabled={uploadStatus === "uploading" || uploadStatus === "indexing"}
+                  disabled={isUploadActiveForSession}
                 >
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-[#050505]">
-                    {uploadStatus === "uploading" || uploadStatus === "indexing" ? (
+                    {isUploadActiveForSession ? (
                       <Loader2 className="size-4 animate-spin text-primary" />
                     ) : (
                       <UploadCloud className="size-4 text-primary" />
@@ -1464,7 +1493,7 @@ export default function ChatPage() {
 
             {(attachedFile || uploadMessage) && (
               <div className="mb-2 space-y-1 px-1">
-                {attachedFile && uploadStatus === "uploading" && (
+                {attachedFile && isUploadActiveForSession && (
                   <motion.div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#050505] border border-white/5 shadow-inner group">
                     <Loader2 className="size-3.5 animate-spin text-primary" />
                     <span className="text-[11px] font-medium text-foreground/80 truncate max-w-[180px]">
@@ -1516,7 +1545,7 @@ export default function ChatPage() {
                         size="icon"
                         className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
                         onClick={handleAttachmentClick}
-                        disabled={uploadStatus === "uploading" || uploadStatus === "indexing"}
+                        disabled={isUploadActiveForSession}
                       >
                         <Paperclip className="size-4" />
                       </Button>
