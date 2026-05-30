@@ -10,7 +10,15 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["development", "staging", "production"]
-LLMProviderName = Literal["groq", "ollama"]
+LLMProviderName = Literal["groq", "openai", "ollama"]
+
+
+def _normalize_database_url(url: str) -> str:
+    """Railway and Heroku often provide postgres:// — SQLAlchemy expects postgresql://."""
+    normalized = url.strip()
+    if normalized.startswith("postgres://"):
+        normalized = "postgresql://" + normalized[len("postgres://") :]
+    return normalized
 
 
 class AppSettings(BaseSettings):
@@ -35,6 +43,8 @@ class AppSettings(BaseSettings):
     LLM_PROVIDER: LLMProviderName = "groq"
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
 
     # Optional local development provider
     OLLAMA_URL: str = "http://localhost:11434"
@@ -43,6 +53,7 @@ class AppSettings(BaseSettings):
     CHROMA_DB_PATH: str = "./chroma_db"
     COLLECTION_NAME: str = "omniai_docs"
 
+    DATABASE_URL: str = ""
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: str = "5432"
     POSTGRES_DB: str = "omniai"
@@ -83,10 +94,22 @@ class AppSettings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        if self.DATABASE_URL.strip():
+            return _normalize_database_url(self.DATABASE_URL)
         return (
             f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
+
+    @property
+    def database_mode(self) -> str:
+        if self.DATABASE_URL.strip():
+            return "railway-postgres"
+        return "local-postgres"
+
+    @property
+    def vector_store_mode(self) -> str:
+        return "chroma"
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -96,6 +119,8 @@ class AppSettings(BaseSettings):
     def llm_model_name(self) -> str:
         if self.LLM_PROVIDER == "groq":
             return self.GROQ_MODEL
+        if self.LLM_PROVIDER == "openai":
+            return self.OPENAI_MODEL
         return self.MODEL_NAME
 
     def validate_for_runtime(self) -> None:
@@ -108,6 +133,10 @@ class AppSettings(BaseSettings):
                 raise RuntimeError("JWT_SECRET_KEY should be at least 32 characters in production.")
             if self.LLM_PROVIDER == "groq" and not self.GROQ_API_KEY.strip():
                 raise RuntimeError("GROQ_API_KEY must be set when LLM_PROVIDER=groq in production.")
+            if self.LLM_PROVIDER == "openai" and not self.OPENAI_API_KEY.strip():
+                raise RuntimeError(
+                    "OPENAI_API_KEY must be set when LLM_PROVIDER=openai in production."
+                )
 
 
 @lru_cache

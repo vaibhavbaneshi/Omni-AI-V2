@@ -1,29 +1,14 @@
 from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-from sqlalchemy.orm import (
-    sessionmaker,
-    declarative_base
-)
+from app.core.app_settings import get_settings
 
-from app.core.config import settings
-
-DATABASE_URL = (
-    f"postgresql://"
-    f"{settings.POSTGRES_USER}:"
-    f"{settings.POSTGRES_PASSWORD}@"
-    f"{settings.POSTGRES_HOST}:"
-    f"{settings.POSTGRES_PORT}/"
-    f"{settings.POSTGRES_DB}"
-)
-
-engine = create_engine(
-    DATABASE_URL
-)
+engine = create_engine(get_settings().database_url)
 
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
-    bind=engine
+    bind=engine,
 )
 
 Base = declarative_base()

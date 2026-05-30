@@ -6,9 +6,10 @@ import os
 
 # Must be set before chromadb import to suppress posthog telemetry errors.
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("CHROMA_TELEMETRY", "FALSE")
 
 import chromadb
-from chromadb.config import Settings as ChromaSettings
+from chromadb.config import Settings
 
 from app.core.app_settings import get_settings
 
@@ -20,7 +21,7 @@ def get_chroma_client(path: str | None = None) -> chromadb.PersistentClient:
     if resolved_path not in _clients:
         _clients[resolved_path] = chromadb.PersistentClient(
             path=resolved_path,
-            settings=ChromaSettings(anonymized_telemetry=False),
+            settings=Settings(anonymized_telemetry=False),
         )
     return _clients[resolved_path]
 

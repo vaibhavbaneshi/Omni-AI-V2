@@ -6,7 +6,7 @@ from sentence_transformers import (
 
 from app.core.config import settings
 from app.core.chroma_client import get_or_create_collection
-from app.core.llm import get_llm_provider
+from app.core.llm import get_llm
 from app.services.prompt_builder import build_stream_prompt
 
 from app.services.reranker_service import (
@@ -266,7 +266,7 @@ def generate_response(
         mode="research",
     )
 
-    provider = get_llm_provider()
+    provider = get_llm()
     return provider.generate(prompt, temperature=0.35, timeout=120)
 
 # -----------------------------------
@@ -315,5 +315,5 @@ def stream_response(
         document_summary=document_summary,
     )
 
-    provider = get_llm_provider()
+    provider = get_llm()
     yield from provider.stream_generate(prompt, temperature=0.35, timeout=120)

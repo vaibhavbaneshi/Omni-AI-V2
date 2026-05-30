@@ -1,13 +1,14 @@
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.app_settings import configure_langsmith_env, get_settings
-from app.core.health import run_health_checks
+from app.core.health import run_health_checks, run_startup_checks
 from app.core.logging_config import setup_logging
+from app.core.startup import log_startup_diagnostics
 from app.api.user_routes import router as user_router
 from app.api.chat_routes import router as chat_router
 from app.api.upload_routes import router as upload_router
@@ -29,9 +30,9 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.validate_for_runtime()
     configure_langsmith_env(settings)
-    logger.info("Starting %s (%s) llm_provider=%s", settings.APP_NAME, settings.ENVIRONMENT, settings.LLM_PROVIDER)
-    health = run_health_checks(probe_llm_network=False)
-    logger.info("Startup health: %s", health.get("status"))
+    log_startup_diagnostics(settings)
+    startup = run_startup_checks()
+    logger.info("Startup complete: %s", startup.get("status"))
     yield
     logger.info("Shutting down %s", settings.APP_NAME)
 
@@ -81,8 +82,13 @@ def root():
 
 
 @app.get("/health")
-def health():
-    return run_health_checks()
+def health(
+    deep: bool = Query(default=False, description="Probe database, Chroma, and LLM network"),
+):
+    return run_health_checks(
+        probe_llm_network=deep,
+        probe_dependencies=deep,
+    )
 
 
 app.include_router(user_router)

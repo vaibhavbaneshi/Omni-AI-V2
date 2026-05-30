@@ -1,6 +1,6 @@
 import re
 
-from app.core.llm import get_llm_provider
+from app.core.llm import get_llm
 
 
 def _clean_title(raw: str, *, fallback: str = "New Chat") -> str:
@@ -14,7 +14,7 @@ def _clean_title(raw: str, *, fallback: str = "New Chat") -> str:
 
 def _generate_title(prompt: str, *, fallback: str) -> str:
     try:
-        provider = get_llm_provider()
+        provider = get_llm()
         response = provider.generate(prompt, temperature=0.2, timeout=30)
         return _clean_title(response, fallback=fallback)
     except Exception:

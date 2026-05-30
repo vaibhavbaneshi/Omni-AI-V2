@@ -26,6 +26,10 @@ class Settings:
         return get_settings().llm_model_name
 
     @property
+    def database_url(self) -> str:
+        return get_settings().database_url
+
+    @property
     def OLLAMA_URL(self) -> str:
         # Kept for backward compatibility in legacy code paths only.
         return get_settings().OLLAMA_URL
