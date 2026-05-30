@@ -6,7 +6,7 @@ from sentence_transformers import (
 
 from app.core.config import settings
 from app.core.chroma_client import get_or_create_collection
-from app.core.llm import get_llm
+from app.services.llm_invoke import invoke_generate, invoke_stream
 from app.services.prompt_builder import build_stream_prompt
 
 from app.services.reranker_service import (
@@ -255,7 +255,10 @@ def retrieve_session_document_context(
 
 def generate_response(
     query: str,
-    context: str
+    context: str,
+    *,
+    user_id: int | None = None,
+    session_id: int | None = None,
 ):
 
     prompt = build_stream_prompt(
@@ -266,8 +269,14 @@ def generate_response(
         mode="research",
     )
 
-    provider = get_llm()
-    return provider.generate(prompt, temperature=0.35, timeout=120)
+    return invoke_generate(
+        prompt,
+        temperature=0.35,
+        timeout=120,
+        endpoint="rag.generate",
+        user_id=user_id,
+        session_id=session_id,
+    )
 
 # -----------------------------------
 # COMPLETE RAG PIPELINE
@@ -301,6 +310,8 @@ def stream_response(
     route=None,
     require_grounding=False,
     document_summary=False,
+    user_id=None,
+    session_id=None,
 ):
     # Route metadata is exposed to the UI via stream meta events, not in the model prompt.
     _ = route
@@ -315,5 +326,11 @@ def stream_response(
         document_summary=document_summary,
     )
 
-    provider = get_llm()
-    yield from provider.stream_generate(prompt, temperature=0.35, timeout=120)
+    yield from invoke_stream(
+        prompt,
+        temperature=0.35,
+        timeout=120,
+        endpoint="rag.stream",
+        user_id=user_id,
+        session_id=session_id,
+    )

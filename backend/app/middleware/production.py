@@ -17,6 +17,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.app_settings import get_settings
 from app.core.telemetry import new_trace_id, set_trace_context
+from app.services.usage_tracking_service import record_api_usage
 
 logger = logging.getLogger("omni.http")
 
@@ -44,6 +45,11 @@ class TraceMiddleware:
         started = time.perf_counter()
         request = Request(scope, receive=receive)
         status_code = 500
+        auth_header = None
+        for name, value in scope.get("headers", []):
+            if name.lower() == b"authorization":
+                auth_header = value.decode("latin-1")
+                break
 
         async def send_wrapper(message: Message) -> None:
             nonlocal status_code
@@ -64,6 +70,14 @@ class TraceMiddleware:
                     status_code,
                     duration_ms,
                     trace_id,
+                )
+                record_api_usage(
+                    method=request.method,
+                    path=request.url.path,
+                    status_code=status_code,
+                    duration_ms=duration_ms,
+                    authorization=auth_header,
+                    trace_id=trace_id,
                 )
             await send(message)
 

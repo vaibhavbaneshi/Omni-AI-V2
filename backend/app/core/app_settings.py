@@ -66,9 +66,17 @@ class AppSettings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 120
     MAX_QUERY_CHARS: int = 12_000
 
+    # Conversation memory windowing (Phase 3).
+    CHAT_HISTORY_MESSAGE_LIMIT: int = 8
+    CONVERSATION_SUMMARY_MIN_MESSAGES: int = 6
+    CONVERSATION_SUMMARY_MAX_CHARS: int = 4000
+
     LANGCHAIN_TRACING_V2: bool = False
     LANGCHAIN_API_KEY: str = ""
     LANGCHAIN_PROJECT: str = "OmniAI"
+
+    # Persist API/model/token metrics to PostgreSQL (Phase 1 observability).
+    ENABLE_USAGE_TRACKING: bool = True
 
     ENABLE_DEEP_RESEARCH: bool = False
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"

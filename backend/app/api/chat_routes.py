@@ -1,5 +1,4 @@
-from fastapi import APIRouter
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 import json
 
 from sqlalchemy.orm import Session
@@ -49,6 +48,7 @@ from app.services.attachment_service import is_document_query
 from app.core.security import get_current_user
 from app.core.app_settings import get_settings
 from app.core.sanitize import sanitize_user_query
+from app.core.telemetry import get_trace_id, set_trace_context
 from app.models.user import User
 from app.models.chat_session import ChatSession
 from app.models.message import Message
@@ -115,16 +115,17 @@ STREAM_HEADERS = {
 
 
 @router.post("/chat-stream")
-
-def chat_stream(
+async def chat_stream(
+    request: Request,
     query: str,
     session_id: int,
     mode: str = "research",
     workspace_id: str = "default",
     collection_id: int | None = None,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
+    set_trace_context(trace_id=get_trace_id(), user_id=current_user.id)
     query = sanitize_user_query(query, max_length=get_settings().MAX_QUERY_CHARS)
     session = (
         db.query(ChatSession)
@@ -177,23 +178,26 @@ def chat_stream(
     # -----------------------------------
 
     complete_response = ""
+    cancelled = False
 
-    def generate():
-
-        nonlocal complete_response
+    async def generate():
+        nonlocal complete_response, cancelled
 
         yield json.dumps(
             {
                 "type": "status",
                 "phase": "routing",
-                "message": "Planning agent route"
+                "message": "Planning agent route",
             }
         ) + "\n"
 
+        if await request.is_disconnected():
+            cancelled = True
+            yield json.dumps({"type": "cancelled", "message": "Client disconnected"}) + "\n"
+            return
+
         try:
-            summary = summarize_conversation(
-                history
-            ) if history else ""
+            summary = summarize_conversation(history) if history else ""
         except Exception:
             summary = ""
 
@@ -205,8 +209,13 @@ def chat_stream(
             workspace_id=workspace_id,
             collection_id=collection_id,
             session_id=session_id,
-            history=history
+            history=history,
         )
+
+        if await request.is_disconnected():
+            cancelled = True
+            yield json.dumps({"type": "cancelled", "message": "Client disconnected"}) + "\n"
+            return
 
         refusal = agent_result.get("refusal")
         context = agent_result["context"]
@@ -231,8 +240,8 @@ def chat_stream(
                 "traces": agent_result.get("traces", []),
                 "memory": {
                     "conversation_history": bool(history),
-                    "summary": bool(summary)
-                }
+                    "summary": bool(summary),
+                },
             }
         ) + "\n"
 
@@ -244,8 +253,12 @@ def chat_stream(
                 session_id=session_id,
                 role="assistant",
                 content=complete_response,
-                user_id=current_user.id
+                user_id=current_user.id,
             )
+            try:
+                generate_summary(session_id=session_id)
+            except Exception:
+                pass
             yield json.dumps({"type": "done"}) + "\n"
             return
 
@@ -259,35 +272,36 @@ def chat_stream(
                 route=route,
                 require_grounding=require_grounding,
                 document_summary=document_summary,
+                user_id=current_user.id,
+                session_id=session_id,
             )
 
             for token in generator:
-                complete_response += token
+                if await request.is_disconnected():
+                    cancelled = True
+                    yield json.dumps({"type": "cancelled", "message": "Generation stopped"}) + "\n"
+                    return
 
-                yield json.dumps(
-                    {
-                        "type": "token",
-                        "content": token
-                    }
-                ) + "\n"
+                complete_response += token
+                yield json.dumps({"type": "token", "content": token}) + "\n"
         except Exception as exc:
-            yield json.dumps(
-                {
-                    "type": "error",
-                    "message": str(exc)
-                }
-            ) + "\n"
+            yield json.dumps({"type": "error", "message": str(exc)}) + "\n"
             yield json.dumps({"type": "done"}) + "\n"
             return
 
-        if complete_response:
+        if complete_response and not cancelled:
             save_message(
                 db=db,
                 session_id=session_id,
                 role="assistant",
                 content=complete_response,
-                user_id=current_user.id
+                user_id=current_user.id,
             )
+
+            try:
+                generate_summary(session_id=session_id)
+            except Exception:
+                pass
 
             try:
                 assistant_count = (
@@ -326,11 +340,7 @@ def chat_stream(
             except Exception:
                 pass
 
-        yield json.dumps(
-            {
-                "type": "done"
-            }
-        ) + "\n"
+        yield json.dumps({"type": "done"}) + "\n"
 
     return StreamingResponse(
         generate(),

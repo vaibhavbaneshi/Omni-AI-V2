@@ -68,6 +68,7 @@ class GroqProvider(BaseLLMProvider):
         self._api_key = settings.GROQ_API_KEY.strip()
         self._model = settings.GROQ_MODEL.strip() or "llama-3.3-70b-versatile"
         self._client = None
+        self.last_usage: dict[str, int] | None = None
 
     @property
     def model_name(self) -> str:
@@ -107,6 +108,13 @@ class GroqProvider(BaseLLMProvider):
             raise LLMProviderError(f"Groq generation failed: {exc}") from exc
 
         message = completion.choices[0].message
+        usage = getattr(completion, "usage", None)
+        if usage is not None:
+            self.last_usage = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                "completion_tokens": getattr(usage, "completion_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            }
         return (message.content or "").strip()
 
     def stream_generate(
@@ -123,12 +131,21 @@ class GroqProvider(BaseLLMProvider):
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
                 stream=True,
+                stream_options={"include_usage": True},
                 timeout=timeout,
             )
         except Exception as exc:
             raise LLMProviderError(f"Groq streaming failed: {exc}") from exc
 
+        self.last_usage = None
         for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                self.last_usage = {
+                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(usage, "completion_tokens", None),
+                    "total_tokens": getattr(usage, "total_tokens", None),
+                }
             delta = chunk.choices[0].delta.content if chunk.choices else None
             if delta:
                 yield delta
@@ -166,6 +183,7 @@ class OpenAIProvider(BaseLLMProvider):
         self._api_key = settings.OPENAI_API_KEY.strip()
         self._model = settings.OPENAI_MODEL.strip() or "gpt-4o-mini"
         self._client = None
+        self.last_usage: dict[str, int] | None = None
 
     @property
     def model_name(self) -> str:
@@ -205,6 +223,13 @@ class OpenAIProvider(BaseLLMProvider):
             raise LLMProviderError(f"OpenAI generation failed: {exc}") from exc
 
         message = completion.choices[0].message
+        usage = getattr(completion, "usage", None)
+        if usage is not None:
+            self.last_usage = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                "completion_tokens": getattr(usage, "completion_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            }
         return (message.content or "").strip()
 
     def stream_generate(
@@ -221,12 +246,21 @@ class OpenAIProvider(BaseLLMProvider):
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
                 stream=True,
+                stream_options={"include_usage": True},
                 timeout=timeout,
             )
         except Exception as exc:
             raise LLMProviderError(f"OpenAI streaming failed: {exc}") from exc
 
+        self.last_usage = None
         for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                self.last_usage = {
+                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(usage, "completion_tokens", None),
+                    "total_tokens": getattr(usage, "total_tokens", None),
+                }
             delta = chunk.choices[0].delta.content if chunk.choices else None
             if delta:
                 yield delta
