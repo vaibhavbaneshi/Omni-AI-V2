@@ -259,6 +259,7 @@ def generate_response(
     *,
     user_id: int | None = None,
     session_id: int | None = None,
+    provider=None,
 ):
 
     prompt = build_stream_prompt(
@@ -276,6 +277,7 @@ def generate_response(
         endpoint="rag.generate",
         user_id=user_id,
         session_id=session_id,
+        provider=provider,
     )
 
 # -----------------------------------
@@ -312,6 +314,7 @@ def stream_response(
     document_summary=False,
     user_id=None,
     session_id=None,
+    provider=None,
 ):
     # Route metadata is exposed to the UI via stream meta events, not in the model prompt.
     _ = route
@@ -333,4 +336,5 @@ def stream_response(
         endpoint="rag.stream",
         user_id=user_id,
         session_id=session_id,
+        provider=provider,
     )

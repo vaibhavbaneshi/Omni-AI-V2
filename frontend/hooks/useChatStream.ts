@@ -37,6 +37,7 @@ export function useChatStream() {
     query,
     sessionId,
     mode,
+    model,
     collectionId,
     token,
     onTitle,
@@ -44,6 +45,7 @@ export function useChatStream() {
     query: string;
     sessionId: number;
     mode?: string;
+    model?: string;
     collectionId?: number | null;
     token?: string | null;
     onTitle?: (payload: { session_id: number; title: string }) => void;
@@ -68,6 +70,7 @@ export function useChatStream() {
         query,
         sessionId,
         mode,
+        model,
         collectionId,
         token,
         signal: controller.signal,

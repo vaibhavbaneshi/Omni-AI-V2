@@ -68,7 +68,9 @@ import {
   type StreamSource,
 } from "@/lib/api";
 import { useChatStream } from "@/hooks/useChatStream";
+import { useModels } from "@/hooks/useModels";
 import { useResizableSidebar } from "@/hooks/useResizableSidebar";
+import { getPreferredModelId, setPreferredModelId } from "@/lib/model-preferences";
 import { isBackendSessionId } from "@/lib/chat-sessions";
 import {
   isSupportedUploadFilename,
@@ -130,13 +132,6 @@ type Chat = {
   folder?: string;
 };
 
-const models = [
-  { id: "gpt-4", name: "GPT-4 Turbo", provider: "OpenAI", icon: Zap, badge: "Latest" },
-  { id: "gpt-3.5", name: "GPT-3.5", provider: "OpenAI", icon: Zap, badge: null },
-  { id: "claude-3", name: "Claude 3 Opus", provider: "Anthropic", icon: Brain, badge: "Smart" },
-  { id: "gemini-pro", name: "Gemini Pro", provider: "Google", icon: Sparkles, badge: null },
-];
-
 const workspaceModes = [
   {
     id: "research",
@@ -171,6 +166,13 @@ function readUrlChatId() {
   return new URLSearchParams(window.location.search).get("id");
 }
 
+function modelIconForProvider(provider: string) {
+  if (provider === "deepseek") return TerminalSquare;
+  if (provider === "router") return Sparkles;
+  if (provider === "groq") return Zap;
+  return Brain;
+}
+
 function buildOptimisticTitle(message: string) {
   const trimmed = message.trim();
   if (!trimmed) return "New Chat";
@@ -193,7 +195,8 @@ export default function ChatPage() {
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const activeChatIdRef = useRef<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState("gpt-4");
+  const { models, routingEnabled } = useModels();
+  const [selectedModel, setSelectedModel] = useState(() => getPreferredModelId());
   const [selectedMode, setSelectedMode] = useState<(typeof workspaceModes)[number]["id"]>("research");
   const [input, setInput] = useState("");
   const {
@@ -207,6 +210,11 @@ export default function ChatPage() {
     cancel: cancelChatStream,
   } = useChatStream();
   const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    if (models.some((model) => model.id === selectedModel)) return;
+    setSelectedModel(models[0]?.id || "auto");
+  }, [models, selectedModel]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "up" | "down">>({});
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -420,6 +428,7 @@ export default function ChatPage() {
         query: currentInput,
         sessionId: Number(updatedChat.id),
         mode: selectedMode,
+        model: selectedModel,
         collectionId: isBackendSessionId(updatedChat.id) ? undefined : activeCollectionId,
         token: session?.token,
         onTitle: applyTitleUpdate,
@@ -434,7 +443,7 @@ export default function ChatPage() {
         role: "assistant",
         content: streamResult.content,
         timestamp: new Date(),
-        model: selectedModel,
+        model: streamResult.meta?.model?.id || selectedModel,
         sources: streamResult.sources,
         toolMeta: streamResult.meta || undefined,
         status: "complete",
@@ -623,6 +632,7 @@ export default function ChatPage() {
   };
 
   const currentModel = models.find((m) => m.id === selectedModel);
+  const CurrentModelIcon = currentModel ? modelIconForProvider(currentModel.provider) : Sparkles;
   const currentMode = workspaceModes.find((mode) => mode.id === selectedMode) || workspaceModes[0];
   const initials = getInitials(session?.name);
   const displayName = session?.name || "John Doe";
@@ -1007,19 +1017,28 @@ export default function ChatPage() {
               </Tooltip>
             )}
 
-            <Select value={selectedModel} onValueChange={(value) => value && setSelectedModel(value)}>
+            <Select
+              value={selectedModel}
+              onValueChange={(value) => {
+                if (!value) return;
+                setSelectedModel(value);
+                setPreferredModelId(value);
+              }}
+            >
               <SelectTrigger className="h-8 max-w-[46vw] gap-2 overflow-hidden border-0 bg-transparent px-2 text-[13px] font-medium hover:bg-muted/50 sm:max-w-none">
                 <div className="flex items-center gap-2">
-                  {currentModel && <currentModel.icon className="size-3.5 text-primary" />}
+                  <CurrentModelIcon className="size-3.5 text-primary" />
                   <SelectValue />
                 </div>
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {models.map((model) => (
+                  {models.map((model) => {
+                    const ModelIcon = modelIconForProvider(model.provider);
+                    return (
                     <SelectItem key={model.id} value={model.id}>
                       <div className="flex items-center gap-2">
-                        <model.icon className="size-4 text-muted-foreground" />
+                        <ModelIcon className="size-4 text-muted-foreground" />
                         <span>{model.name}</span>
                         {model.badge && (
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-normal">
@@ -1028,10 +1047,17 @@ export default function ChatPage() {
                         )}
                       </div>
                     </SelectItem>
-                  ))}
+                    );
+                  })}
                 </SelectGroup>
               </SelectContent>
             </Select>
+
+            {routingEnabled && selectedModel === "auto" && (
+              <Badge variant="outline" className="hidden text-[10px] font-normal lg:inline-flex">
+                Smart routing
+              </Badge>
+            )}
 
             <div className="hidden items-center gap-1 rounded-lg border border-white/5 bg-white/[0.02] p-1 md:flex">
               {workspaceModes.map((mode) => (

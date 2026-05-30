@@ -280,7 +280,34 @@ export type StreamMeta = {
     conversation_history?: boolean;
     summary?: boolean;
   };
+  model?: {
+    id: string;
+    provider: string;
+    model_name: string;
+    display_name: string;
+    routing_reason: string;
+  };
 };
+
+export type ModelDefinition = {
+  id: string;
+  name: string;
+  provider: string;
+  model_name: string;
+  description: string;
+  roles: string[];
+  badge?: string | null;
+  available: boolean;
+};
+
+export type ModelsResponse = {
+  routing_enabled: boolean;
+  models: ModelDefinition[];
+};
+
+export async function fetchModels() {
+  return apiRequest<ModelsResponse>("/models");
+}
 
 export type ChatStreamEvent =
   | ({ type: "meta" } & StreamMeta)
@@ -295,6 +322,7 @@ export async function streamChat({
   query,
   sessionId,
   mode,
+  model,
   collectionId,
   token,
   signal,
@@ -303,6 +331,7 @@ export async function streamChat({
   query: string;
   sessionId: number;
   mode?: string;
+  model?: string;
   collectionId?: number | null;
   token?: string | null;
   signal?: AbortSignal;
@@ -313,6 +342,10 @@ export async function streamChat({
     session_id: String(sessionId),
     mode: mode || "research",
   });
+
+  if (model) {
+    params.set("model", model);
+  }
 
   if (collectionId) {
     params.set("collection_id", String(collectionId));

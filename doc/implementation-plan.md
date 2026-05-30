@@ -189,22 +189,23 @@ flowchart TD
 
 ---
 
-## Phase 7 — Multi-Model Routing
+## Phase 7 — Multi-Model Routing ✅
 
-### Current state
-Single `LLM_PROVIDER` + one model per provider. Agent routing is rule-based, not model-based.
-
-### Work items
-1. `ModelRouter` service — mode/intent → provider + model
-2. Extend `llm.py` with multi-provider registry
-3. Env: `GROQ_FAST_MODEL`, `DEEPSEEK_API_KEY`, etc.
-4. Admin model settings page (frontend)
-5. Pass `model` from frontend or derive from `mode`
+### Delivered
+- `ModelRouter` service — mode/intent → provider + model
+- Extended `llm.py` with DeepSeek provider and `create_llm_provider()`
+- Env: `GROQ_FAST_MODEL`, `DEEPSEEK_API_KEY`, `MODEL_ROUTING_ENABLED`, etc.
+- `GET /models` catalog and `GET /models/route` preview
+- Chat model selector + settings default model wired to backend catalog
+- Docs: `doc/models/routing.md`
 
 ### Affected files
-- `backend/app/services/model_router.py` *(new)*
+- `backend/app/services/model_router.py`
+- `backend/app/core/model_catalog.py`
 - `backend/app/core/llm.py`
 - `backend/app/core/app_settings.py`
+- `backend/app/api/model_routes.py`
+- `frontend/app/chat/page.tsx`
 - `frontend/app/settings/page.tsx`
 
 ---

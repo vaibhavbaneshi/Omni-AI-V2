@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -43,6 +43,8 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { getInitials, useRequireAuth } from "@/lib/auth";
+import { useModels } from "@/hooks/useModels";
+import { getPreferredModelId, setPreferredModelId } from "@/lib/model-preferences";
 
 const fadeIn = {
   initial: { opacity: 0, y: 16 },
@@ -50,7 +52,7 @@ const fadeIn = {
 };
 
 const settingCards = [
-  { label: "Model routing", value: "GPT-4 primary", icon: Brain },
+  { label: "Model routing", value: "Loading…", icon: Brain },
   { label: "Workspace mode", value: "Pro control", icon: SlidersHorizontal },
   { label: "Security posture", value: "Protected", icon: Shield },
 ];
@@ -108,9 +110,20 @@ function MetricTile({ label, value }: { label: string; value: string }) {
 
 export default function SettingsPage() {
   const { session, ready, authenticated } = useRequireAuth();
+  const { models, routingEnabled } = useModels();
+  const [defaultModel, setDefaultModel] = useState(() => getPreferredModelId());
   const [isSaving, setIsSaving] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+
+  useEffect(() => {
+    if (models.some((model) => model.id === defaultModel)) return;
+    setDefaultModel(models[0]?.id || "auto");
+  }, [models, defaultModel]);
+
+  const selectedModelLabel =
+    models.find((model) => model.id === defaultModel)?.name ||
+    (routingEnabled ? "Auto Route" : "Llama 3.3 70B");
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -189,7 +202,9 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">{item.label}</p>
-                  <p className="text-sm font-medium">{item.value}</p>
+                  <p className="text-sm font-medium">
+                    {item.label === "Model routing" ? selectedModelLabel : item.value}
+                  </p>
                 </div>
               </div>
             ))}
@@ -286,17 +301,31 @@ export default function SettingsPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Default Model</Label>
-                    <Select defaultValue="gpt-4">
+                    <Select
+                      value={defaultModel}
+                      onValueChange={(value) => {
+                        if (!value) return;
+                        setDefaultModel(value);
+                        setPreferredModelId(value);
+                      }}
+                    >
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          <SelectItem value="gpt-4">GPT-4 (Recommended)</SelectItem>
-                          <SelectItem value="gpt-3.5">GPT-3.5 Turbo</SelectItem>
-                          <SelectItem value="claude-3">Claude 3 Opus</SelectItem>
-                          <SelectItem value="gemini">Gemini Pro</SelectItem>
+                          {models.map((model) => (
+                            <SelectItem key={model.id} value={model.id}>
+                              {model.name}
+                              {model.badge ? ` · ${model.badge}` : ""}
+                            </SelectItem>
+                          ))}
                         </SelectGroup>
                       </SelectContent>
                     </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {routingEnabled
+                        ? "Auto Route picks the best model by workspace mode and query type."
+                        : "Automatic routing is disabled on the server; explicit model selection is used."}
+                    </p>
                   </div>
 
                   <div className="space-y-2">

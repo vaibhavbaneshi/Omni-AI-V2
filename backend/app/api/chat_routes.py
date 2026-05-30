@@ -49,6 +49,8 @@ from app.core.security import get_current_user
 from app.core.app_settings import get_settings
 from app.core.sanitize import sanitize_user_query
 from app.core.telemetry import get_trace_id, set_trace_context
+from app.core.llm import LLMProviderError
+from app.services.model_router import get_provider_for_route, resolve_model_route
 from app.models.user import User
 from app.models.chat_session import ChatSession
 from app.models.message import Message
@@ -120,6 +122,7 @@ async def chat_stream(
     query: str,
     session_id: int,
     mode: str = "research",
+    model: str | None = None,
     workspace_id: str = "default",
     collection_id: int | None = None,
     current_user: User = Depends(get_current_user),
@@ -127,6 +130,22 @@ async def chat_stream(
 ):
     set_trace_context(trace_id=get_trace_id(), user_id=current_user.id)
     query = sanitize_user_query(query, max_length=get_settings().MAX_QUERY_CHARS)
+
+    try:
+        model_route = resolve_model_route(mode=mode, query=query, model_id=model)
+        llm_provider = get_provider_for_route(model_route)
+    except LLMProviderError as exc:
+        def model_error():
+            yield json.dumps({"type": "error", "message": str(exc)}) + "\n"
+            yield json.dumps({"type": "done"}) + "\n"
+
+        return StreamingResponse(
+            model_error(),
+            media_type="application/x-ndjson",
+            status_code=400,
+            headers=STREAM_HEADERS,
+        )
+
     session = (
         db.query(ChatSession)
         .filter(
@@ -242,6 +261,7 @@ async def chat_stream(
                     "conversation_history": bool(history),
                     "summary": bool(summary),
                 },
+                "model": model_route.to_dict(),
             }
         ) + "\n"
 
@@ -274,6 +294,7 @@ async def chat_stream(
                 document_summary=document_summary,
                 user_id=current_user.id,
                 session_id=session_id,
+                provider=llm_provider,
             )
 
             for token in generator:
