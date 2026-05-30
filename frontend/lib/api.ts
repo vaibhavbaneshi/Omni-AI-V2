@@ -139,7 +139,16 @@ export type DocumentRecord = {
   collection_id: number;
   session_id?: number | null;
   chunks_created: number;
+  status?: "indexing" | "ready";
 };
+
+export function isDocumentReady(document: DocumentRecord): boolean {
+  return document.status === "ready" || document.chunks_created > 0;
+}
+
+export function isDocumentIndexing(document: DocumentRecord): boolean {
+  return !isDocumentReady(document);
+}
 
 export async function listDocuments(
   token?: string | null,
@@ -156,32 +165,60 @@ export async function listDocuments(
   return apiRequest<{ documents: DocumentRecord[] }>(`/documents${suffix}`, {}, token);
 }
 
+export async function getDocumentStatus(documentId: number, token?: string | null) {
+  return apiRequest<{
+    id: number;
+    filename: string;
+    chunks_created: number;
+    status: "indexing" | "ready";
+  }>(`/documents/${documentId}/status`, {}, token);
+}
+
 export async function waitForDocumentIndexed(
   documentId: number,
-  sessionId: number,
   token?: string | null,
   maxWaitMs = 180_000
 ) {
   const started = Date.now();
+  let delayMs = 750;
 
   while (Date.now() - started < maxWaitMs) {
-    const { documents } = await listDocuments(token, { sessionId });
-    const document = documents.find((item) => item.id === documentId);
-    if (document && document.chunks_created > 0) {
+    const document = await getDocumentStatus(documentId, token);
+    if (document.status === "ready" || document.chunks_created > 0) {
       return document;
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    delayMs = Math.min(delayMs + 250, 2000);
   }
 
   throw new ApiError(
-    "Document indexing is taking longer than expected. Try refreshing in a moment.",
+    "Document indexing is taking longer than expected. It will keep processing in the background.",
     408
   );
 }
 
-export async function deleteDocument(filename: string, token?: string | null) {
-  return apiRequest<{ message: string; filename: string }>(
-    `/documents/${encodeURIComponent(filename)}`,
+export async function deleteDocumentById(documentId: number, token?: string | null) {
+  return apiRequest<{ message: string; filename: string; document_id: number }>(
+    `/documents/id/${documentId}`,
+    {
+      method: "DELETE",
+    },
+    token
+  );
+}
+
+export async function deleteDocument(
+  filename: string,
+  token?: string | null,
+  options?: { sessionId?: number | null }
+) {
+  const params = new URLSearchParams();
+  if (options?.sessionId) {
+    params.set("session_id", String(options.sessionId));
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return apiRequest<{ message: string; filename: string; document_id?: number }>(
+    `/documents/${encodeURIComponent(filename)}${suffix}`,
     {
       method: "DELETE",
     },

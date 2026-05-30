@@ -220,6 +220,8 @@ export default function ChatPage() {
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const {
     documents,
+    readyDocuments,
+    indexingDocuments,
     collections,
     activeCollectionId,
     setActiveCollectionId,
@@ -233,7 +235,7 @@ export default function ChatPage() {
   } = useDocuments(session?.token, activeChat?.id ?? null);
   const { memories, addMemory, removeMemory } = useMemory(session?.token);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
-  const [deletingDocument, setDeletingDocument] = useState<string | null>(null);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [expandedFolders, setExpandedFolders] = useState<string[]>(["Work"]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -684,7 +686,6 @@ export default function ChatPage() {
     try {
       const chat = await ensureBackendChat(stripUploadExtension(file.name));
       await uploadWorkspaceDocument(file, { sessionId: Number(chat.id) });
-      setAttachedFile(null);
     } catch (error) {
       setUploadStatus("error");
       setUploadMessage(
@@ -693,6 +694,8 @@ export default function ChatPage() {
           status: error instanceof ApiError ? error.status : undefined,
         })
       );
+    } finally {
+      setAttachedFile(null);
     }
   };
 
@@ -715,21 +718,15 @@ export default function ChatPage() {
     }
   };
 
-  const handleRemoveAttachment = () => {
-    setAttachedFile(null);
-    setUploadStatus("idle");
-    setUploadMessage(null);
-  };
-
-  const handleDeleteDocument = async (filename: string) => {
-    setDeletingDocument(filename);
+  const handleDeleteDocument = async (documentId: number, filename: string) => {
+    setDeletingDocumentId(documentId);
 
     try {
-      await removeWorkspaceDocument(filename);
-      await refreshDocuments();
+      await removeWorkspaceDocument(documentId);
       setUploadStatus("success");
       setUploadMessage(`${filename} removed from knowledge base.`);
     } catch (error) {
+      await refreshDocuments();
       setUploadStatus("error");
       setUploadMessage(
         sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
@@ -738,7 +735,7 @@ export default function ChatPage() {
         })
       );
     } finally {
-      setDeletingDocument(null);
+      setDeletingDocumentId(null);
     }
   };
 
@@ -1420,10 +1417,10 @@ export default function ChatPage() {
                   type="button"
                   className="flex min-w-0 items-center gap-3 text-left"
                   onClick={handleAttachmentClick}
-                  disabled={uploadStatus === "uploading"}
+                  disabled={uploadStatus === "uploading" || uploadStatus === "indexing"}
                 >
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-[#050505]">
-                    {uploadStatus === "uploading" ? (
+                    {uploadStatus === "uploading" || uploadStatus === "indexing" ? (
                       <Loader2 className="size-4 animate-spin text-primary" />
                     ) : (
                       <UploadCloud className="size-4 text-primary" />
@@ -1435,18 +1432,25 @@ export default function ChatPage() {
                     </p>
                     <p className="truncate text-[11px] text-muted-foreground/55">
                       {documents.length > 0
-                        ? `${documents.length} file${documents.length === 1 ? "" : "s"} in this chat`
+                        ? `${readyDocuments.length} ready${indexingDocuments.length > 0 ? ` · ${indexingDocuments.length} indexing` : ""}`
                         : `Supported: ${SUPPORTED_UPLOADS_LABEL}. Files are scoped to this conversation.`}
                     </p>
                   </div>
                 </button>
                 <div className="flex flex-wrap gap-1.5">
-                  {documents.slice(0, 3).map((document) => (
+                  {indexingDocuments.slice(0, 3).map((document) => (
                     <DocumentChip
-                      key={document.filename}
+                      key={`indexing-${document.id}`}
                       document={document}
-                      deleting={deletingDocument === document.filename}
-                      onDelete={() => handleDeleteDocument(document.filename)}
+                      indexing
+                    />
+                  ))}
+                  {readyDocuments.slice(0, 3).map((document) => (
+                    <DocumentChip
+                      key={document.id}
+                      document={document}
+                      deleting={deletingDocumentId === document.id}
+                      onDelete={() => handleDeleteDocument(document.id, document.filename)}
                     />
                   ))}
                   {documents.length > 3 && (
@@ -1460,30 +1464,17 @@ export default function ChatPage() {
 
             {(attachedFile || uploadMessage) && (
               <div className="mb-2 space-y-1 px-1">
-                {attachedFile && (
+                {attachedFile && uploadStatus === "uploading" && (
                   <motion.div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#050505] border border-white/5 shadow-inner group">
-                    {uploadStatus === "uploading" ? (
-                      <Loader2 className="size-3.5 animate-spin text-primary" />
-                    ) : (
-                      <FileIcon className="size-3.5 text-blue-400" />
-                    )}
+                    <Loader2 className="size-3.5 animate-spin text-primary" />
                     <span className="text-[11px] font-medium text-foreground/80 truncate max-w-[180px]">
-                      {attachedFile.name}
+                      Uploading {attachedFile.name}...
                     </span>
-                    <button
-                      type="button"
-                      className="size-4 rounded-full bg-white/5 flex items-center justify-center opacity-70 hover:opacity-100 hover:bg-white/10 ml-1"
-                      onClick={handleRemoveAttachment}
-                      aria-label="Remove attachment"
-                      disabled={uploadStatus === "uploading"}
-                    >
-                      <X className="size-2.5 text-muted-foreground hover:text-foreground" />
-                    </button>
                   </motion.div>
                 )}
                 {uploadMessage && (
                   <p
-                    className={`text-[11px] ${uploadStatus === "error" ? "text-destructive" : "text-emerald-300"
+                    className={`text-[11px] ${uploadStatus === "error" ? "text-destructive" : uploadStatus === "indexing" ? "text-primary/80" : "text-emerald-300"
                       }`}
                   >
                     {uploadMessage}
@@ -1525,7 +1516,7 @@ export default function ChatPage() {
                         size="icon"
                         className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
                         onClick={handleAttachmentClick}
-                        disabled={uploadStatus === "uploading"}
+                        disabled={uploadStatus === "uploading" || uploadStatus === "indexing"}
                       >
                         <Paperclip className="size-4" />
                       </Button>
@@ -1759,26 +1750,40 @@ function SourceCard({
 
 function DocumentChip({
   document,
-  deleting,
+  deleting = false,
+  indexing = false,
   onDelete,
 }: {
   document: DocumentRecord;
-  deleting: boolean;
-  onDelete: () => void;
+  deleting?: boolean;
+  indexing?: boolean;
+  onDelete?: () => void;
 }) {
   return (
-    <span className="group inline-flex max-w-[180px] items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-muted-foreground">
-      <FileIcon className="size-3 shrink-0 text-blue-300" />
+    <span
+      className={`group inline-flex max-w-[180px] items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] ${
+        indexing
+          ? "border-primary/20 bg-primary/5 text-primary/80"
+          : "border-white/10 bg-white/[0.03] text-muted-foreground"
+      }`}
+    >
+      {indexing ? (
+        <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
+      ) : (
+        <FileIcon className="size-3 shrink-0 text-blue-300" />
+      )}
       <span className="truncate">{document.filename}</span>
-      <button
-        type="button"
-        className="ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-white/10 hover:text-foreground"
-        onClick={onDelete}
-        aria-label={`Remove ${document.filename}`}
-        disabled={deleting}
-      >
-        {deleting ? <Loader2 className="size-2.5 animate-spin" /> : <X className="size-2.5" />}
-      </button>
+      {!indexing && onDelete && (
+        <button
+          type="button"
+          className="ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-white/10 hover:text-foreground"
+          onClick={onDelete}
+          aria-label={`Remove ${document.filename}`}
+          disabled={deleting}
+        >
+          {deleting ? <Loader2 className="size-2.5 animate-spin" /> : <X className="size-2.5" />}
+        </button>
+      )}
     </span>
   );
 }

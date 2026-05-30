@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createCollection,
-  deleteDocument,
+  deleteDocumentById,
+  getDocumentStatus,
+  isDocumentIndexing,
+  isDocumentReady,
   listCollections,
   listDocuments,
   uploadDocument,
-  waitForDocumentIndexed,
   ApiError,
   type DocumentCollection,
   type DocumentRecord,
@@ -23,13 +25,16 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [collections, setCollections] = useState<DocumentCollection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState<number | null>(null);
-  const [status, setStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "uploading" | "indexing" | "success" | "error">(
+    "idle"
+  );
   const [message, setMessage] = useState<string | null>(null);
 
   const numericSessionId =
     sessionId && isBackendSessionId(sessionId) ? Number(sessionId) : null;
 
   const uploadInProgressRef = useRef(false);
+  const pollTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!token) {
@@ -43,11 +48,14 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     ]);
 
     setDocuments(documentResult.documents);
+
     setCollections(collectionResult.collections);
 
     if (!activeCollectionId && collectionResult.collections.length > 0) {
       setActiveCollectionId(collectionResult.collections[0].id);
     }
+
+    return documentResult.documents;
   }, [activeCollectionId, numericSessionId, token]);
 
   useEffect(() => {
@@ -63,6 +71,82 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
     return () => window.clearTimeout(id);
   }, [numericSessionId, token, refresh]);
+
+  const pollIndexingDocuments = useCallback(async () => {
+    if (!token) return;
+
+    const pending = documents.filter(isDocumentIndexing);
+    if (pending.length === 0) {
+      if (status === "indexing") {
+        setStatus("success");
+      }
+      return;
+    }
+
+    setStatus("indexing");
+
+    const updates = await Promise.all(
+      pending.map(async (document) => {
+        try {
+          return await getDocumentStatus(document.id, token);
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    let becameReady = false;
+
+    setDocuments((current) =>
+      current.map((document) => {
+        const update = updates.find((item) => item?.id === document.id);
+        if (!update) return document;
+        if (update.status === "ready" || update.chunks_created > 0) {
+          becameReady = true;
+          return {
+            ...document,
+            chunks_created: update.chunks_created,
+            status: "ready" as const,
+          };
+        }
+        return document;
+      })
+    );
+
+    if (becameReady) {
+      const readyCount = documents.filter(isDocumentReady).length + 1;
+      setMessage(`${readyCount} document${readyCount === 1 ? "" : "s"} ready in this chat.`);
+      setStatus("success");
+    } else {
+      const names = pending.map((document) => document.filename).join(", ");
+      setMessage(`Indexing ${names}...`);
+    }
+  }, [documents, status, token]);
+
+  useEffect(() => {
+    if (!token || documents.every(isDocumentReady)) {
+      if (pollTimerRef.current) {
+        window.clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      return;
+    }
+
+    pollIndexingDocuments().catch(() => undefined);
+
+    if (!pollTimerRef.current) {
+      pollTimerRef.current = window.setInterval(() => {
+        pollIndexingDocuments().catch(() => undefined);
+      }, 1200);
+    }
+
+    return () => {
+      if (pollTimerRef.current) {
+        window.clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [documents, pollIndexingDocuments, token]);
 
   const upload = async (file: File, options?: { sessionId?: number | null }) => {
     const sessionId = options?.sessionId ?? numericSessionId;
@@ -100,20 +184,32 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
         sessionId,
       });
 
-      if (result.indexing) {
-        setMessage("Indexing document...");
-        const indexed = await waitForDocumentIndexed(result.document_id, sessionId, token);
-        setStatus("success");
-        setMessage(
-          `Document indexed successfully (${indexed.chunks_created} chunks indexed)`
-        );
-        refresh().catch(() => undefined);
-        return { ...result, chunks_created: indexed.chunks_created, indexing: false };
+      const latestDocuments = await refresh();
+      const uploadedDocument =
+        latestDocuments?.find((document) => document.id === result.document_id) ?? {
+          id: result.document_id,
+          filename: result.filename,
+          size: file.size,
+          updated_at: Date.now() / 1000,
+          collection_id: result.collection_id,
+          session_id: sessionId,
+          chunks_created: result.chunks_created,
+          status: result.indexing ? ("indexing" as const) : ("ready" as const),
+        };
+
+      setDocuments((current) => {
+        const withoutDuplicate = current.filter((document) => document.id !== uploadedDocument.id);
+        return [uploadedDocument, ...withoutDuplicate];
+      });
+
+      if (result.indexing || uploadedDocument.chunks_created === 0) {
+        setStatus("indexing");
+        setMessage(`Indexing ${result.filename}...`);
+        return { ...result, indexing: true };
       }
 
       setStatus("success");
       setMessage(`${result.message} (${result.chunks_created} chunks indexed)`);
-      refresh().catch(() => undefined);
       return result;
     } catch (error) {
       setStatus("error");
@@ -129,8 +225,9 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     }
   };
 
-  const remove = async (filename: string) => {
-    await deleteDocument(filename, token);
+  const remove = async (documentId: number) => {
+    setDocuments((current) => current.filter((document) => document.id !== documentId));
+    await deleteDocumentById(documentId, token);
     await refresh();
   };
 
@@ -141,8 +238,13 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     return collection;
   };
 
+  const readyDocuments = documents.filter(isDocumentReady);
+  const indexingDocuments = documents.filter(isDocumentIndexing);
+
   return {
     documents,
+    readyDocuments,
+    indexingDocuments,
     collections,
     activeCollectionId,
     setActiveCollectionId,

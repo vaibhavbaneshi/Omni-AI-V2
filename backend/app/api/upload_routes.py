@@ -234,34 +234,15 @@ def list_documents(
                 "collection_id": document.collection_id,
                 "session_id": document.session_id,
                 "chunks_created": document.chunks_created,
+                "status": "ready" if document.chunks_created > 0 else "indexing",
             }
             for document in records
         ]
     }
 
 
-@router.delete("/documents/{filename}")
-def delete_document(
-    filename: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-
-    safe_name = os.path.basename(filename)
-    document = (
-        db.query(DocumentRecord)
-        .filter(
-            DocumentRecord.user_id == current_user.id,
-            DocumentRecord.filename == safe_name
-        )
-        .first()
-    )
-
-    if not document:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found"
-        )
+def _delete_document_record(document: DocumentRecord, db: Session) -> str:
+    safe_name = document.filename
 
     if os.path.exists(document.storage_path):
         os.remove(document.storage_path)
@@ -270,8 +251,8 @@ def delete_document(
         where={
             "$and": [
                 {"source": safe_name},
-                {"user_id": str(current_user.id)},
-                {"document_id": str(document.id)}
+                {"user_id": str(document.user_id)},
+                {"document_id": str(document.id)},
             ]
         }
     )
@@ -279,16 +260,93 @@ def delete_document(
     ids = matches.get("ids", [])
 
     if ids:
-        get_document_collection().delete(
-            ids=ids
-        )
+        get_document_collection().delete(ids=ids)
 
     db.delete(document)
     db.commit()
+    return safe_name
+
+
+@router.get("/documents/{document_id}/status")
+def get_document_status(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    document = (
+        db.query(DocumentRecord)
+        .filter(
+            DocumentRecord.id == document_id,
+            DocumentRecord.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    return {
+        "id": document.id,
+        "filename": document.filename,
+        "chunks_created": document.chunks_created,
+        "status": "ready" if document.chunks_created > 0 else "indexing",
+    }
+
+
+@router.delete("/documents/id/{document_id}")
+def delete_document_by_id(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    document = (
+        db.query(DocumentRecord)
+        .filter(
+            DocumentRecord.id == document_id,
+            DocumentRecord.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    filename = _delete_document_record(document, db)
 
     return {
         "message": "Document deleted",
-        "filename": safe_name
+        "filename": filename,
+        "document_id": document_id,
+    }
+
+
+@router.delete("/documents/{filename}")
+def delete_document(
+    filename: str,
+    session_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    safe_name = os.path.basename(filename)
+    query = db.query(DocumentRecord).filter(
+        DocumentRecord.user_id == current_user.id,
+        DocumentRecord.filename == safe_name,
+    )
+
+    if session_id is not None:
+        query = query.filter(DocumentRecord.session_id == session_id)
+
+    document = query.order_by(DocumentRecord.created_at.desc()).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    deleted_name = _delete_document_record(document, db)
+
+    return {
+        "message": "Document deleted",
+        "filename": deleted_name,
+        "document_id": document.id,
     }
 
 
