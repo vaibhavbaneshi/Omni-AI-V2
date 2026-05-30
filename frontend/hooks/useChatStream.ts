@@ -8,6 +8,13 @@ import {
   type StreamSource,
 } from "@/lib/api";
 
+export type ChatStreamResult = {
+  content: string;
+  meta: StreamMeta | null;
+  sources: StreamSource[];
+  title: { session_id: number; title: string } | null;
+};
+
 export function useChatStream() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
@@ -33,7 +40,7 @@ export function useChatStream() {
     collectionId?: number | null;
     token?: string | null;
     onTitle?: (payload: { session_id: number; title: string }) => void;
-  }) => {
+  }): Promise<ChatStreamResult> => {
     setIsStreaming(true);
     setStreamingContent("");
     setStreamingMeta(null);

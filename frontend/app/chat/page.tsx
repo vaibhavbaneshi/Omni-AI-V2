@@ -336,8 +336,8 @@ export default function ChatPage() {
   }, [authenticated, session?.token]);
 
   useEffect(() => {
-    const numericId = isBackendSessionId(activeChat?.id) ? Number(activeChat.id) : null;
     const chatId = activeChat?.id;
+    const numericId = chatId && isBackendSessionId(chatId) ? Number(chatId) : null;
 
     if (!session?.token || !activeChat || numericId === null || !chatId) return;
     if (activeChat.messages.length > 0) return;
