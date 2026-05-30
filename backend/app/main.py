@@ -11,6 +11,7 @@ from app.core.app_settings import configure_langsmith_env, get_settings
 from app.core.health import run_health_checks, run_startup_checks
 from app.core.logging_config import setup_logging
 from app.core.startup import log_startup_diagnostics
+from app.db.migrations import run_migrations
 from app.api.user_routes import router as user_router
 from app.api.chat_routes import router as chat_router
 from app.api.upload_routes import router as upload_router
@@ -33,6 +34,14 @@ async def lifespan(app: FastAPI):
     settings.validate_for_runtime()
     configure_langsmith_env(settings)
     log_startup_diagnostics(settings)
+    try:
+        run_migrations()
+    except Exception as exc:
+        logger.error("Database migration failed: %s", exc, exc_info=exc)
+        logger.warning(
+            "Continuing startup without migrations; auth and persistence may fail until "
+            "`alembic upgrade head` succeeds."
+        )
     startup = run_startup_checks()
     logger.info("Startup complete: %s", startup.get("status"))
     yield

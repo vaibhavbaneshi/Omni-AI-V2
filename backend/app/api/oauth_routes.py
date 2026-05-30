@@ -1,10 +1,13 @@
 from urllib.parse import urlencode
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.core.oauth_config import get_oauth_settings, oauth_providers_status
+from app.core.safe_errors import user_facing_message
 from app.db.session import get_db
 from app.services.auth_service import create_access_token
 from app.services.oauth_service import (
@@ -20,6 +23,7 @@ from app.services.oauth_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 def _sanitize_next_path(next_path: str | None) -> str:
@@ -131,7 +135,8 @@ def github_callback(
             next_path=next_path,
         )
     except Exception as exc:
-        return _redirect_to_frontend_error(str(exc), next_path)
+        safe_message = user_facing_message(exc, context="GitHub OAuth callback")
+        return _redirect_to_frontend_error(safe_message, next_path)
 
 
 @router.get("/google")
@@ -197,4 +202,5 @@ def google_callback(
             next_path=next_path,
         )
     except Exception as exc:
-        return _redirect_to_frontend_error(str(exc), next_path)
+        safe_message = user_facing_message(exc, context="Google OAuth callback")
+        return _redirect_to_frontend_error(safe_message, next_path)

@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
 import { useAuthRedirect } from "@/lib/auth";
+import { sanitizeAuthError } from "@/lib/user-facing-errors";
 import { fadeUpVariant } from "@/lib/motion";
 
 export default function LoginPage() {
@@ -16,7 +17,7 @@ export default function LoginPage() {
     const oauthError = new URLSearchParams(window.location.search).get("error");
     if (oauthError) {
       const id = window.setTimeout(() => {
-        setError(oauthError);
+        setError(sanitizeAuthError(oauthError));
       }, 0);
 
       return () => window.clearTimeout(id);

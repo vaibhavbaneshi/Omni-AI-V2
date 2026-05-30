@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Sparkles } from "lucide-react";
 import { createSession } from "@/lib/auth";
+import { sanitizeAuthError } from "@/lib/user-facing-errors";
 
 function AuthCallbackContent() {
   const router = useRouter();
@@ -19,11 +20,12 @@ function AuthCallbackContent() {
     const next = searchParams.get("next") || "/dashboard";
 
     if (error) {
+      const safeError = sanitizeAuthError(error);
       const messageTimeout = window.setTimeout(() => {
-        setMessage(error);
+        setMessage(safeError);
       }, 0);
       const timeout = window.setTimeout(() => {
-        router.replace(`/login?error=${encodeURIComponent(error)}`);
+        router.replace(`/login?error=${encodeURIComponent(safeError)}`);
       }, 2500);
       return () => {
         window.clearTimeout(messageTimeout);
