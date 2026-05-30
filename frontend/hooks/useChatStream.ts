@@ -13,6 +13,7 @@ export type ChatStreamResult = {
   meta: StreamMeta | null;
   sources: StreamSource[];
   title: { session_id: number; title: string } | null;
+  cancelled: boolean;
 };
 
 export function useChatStream() {
@@ -25,6 +26,12 @@ export function useChatStream() {
   const metaRef = useRef<StreamMeta | null>(null);
   const sourcesRef = useRef<StreamSource[]>([]);
   const titleRef = useRef<{ session_id: number; title: string } | null>(null);
+  const cancelledRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const cancel = () => {
+    abortControllerRef.current?.abort();
+  };
 
   const start = async ({
     query,
@@ -41,6 +48,10 @@ export function useChatStream() {
     token?: string | null;
     onTitle?: (payload: { session_id: number; title: string }) => void;
   }): Promise<ChatStreamResult> => {
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsStreaming(true);
     setStreamingContent("");
     setStreamingMeta(null);
@@ -50,6 +61,7 @@ export function useChatStream() {
     metaRef.current = null;
     sourcesRef.current = [];
     titleRef.current = null;
+    cancelledRef.current = false;
 
     try {
       await streamChat({
@@ -58,9 +70,16 @@ export function useChatStream() {
         mode,
         collectionId,
         token,
+        signal: controller.signal,
         onEvent: (event) => {
           if (event.type === "status") {
             setStreamStatus(event);
+            return;
+          }
+
+          if (event.type === "cancelled") {
+            cancelledRef.current = true;
+            setStreamError(null);
             return;
           }
 
@@ -94,8 +113,20 @@ export function useChatStream() {
         meta: metaRef.current,
         sources: sourcesRef.current,
         title: titleRef.current,
+        cancelled: cancelledRef.current,
       };
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        cancelledRef.current = true;
+        return {
+          content: contentRef.current,
+          meta: metaRef.current,
+          sources: sourcesRef.current,
+          title: titleRef.current,
+          cancelled: true,
+        };
+      }
+
       const errAny = error as { status?: number; statusText?: string; message?: string };
       if (errAny?.status) {
         console.error("streamChat error:", errAny.status, errAny.statusText, errAny.message || errAny);
@@ -121,6 +152,7 @@ export function useChatStream() {
       setStreamingContent("");
       setStreamingMeta(null);
       setStreamStatus(null);
+      abortControllerRef.current = null;
     }
   };
 
@@ -132,5 +164,6 @@ export function useChatStream() {
     streamError,
     setStreamError,
     start,
+    cancel,
   };
 }

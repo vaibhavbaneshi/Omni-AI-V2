@@ -220,6 +220,14 @@ export async function updateChatSessionTitle(
   );
 }
 
+export async function deleteChatSession(sessionId: number, token?: string | null) {
+  return apiRequest<{ message: string; session_id: number }>(
+    `/sessions/${sessionId}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
 export async function getChatSessionMessages(sessionId: number, token?: string | null) {
   return apiRequest<ChatMessageRecord[]>(`/sessions/${sessionId}/messages`, {}, token);
 }
@@ -278,6 +286,7 @@ export type ChatStreamEvent =
   | ({ type: "meta" } & StreamMeta)
   | { type: "status"; phase: string; message: string; tool?: string }
   | { type: "error"; message: string }
+  | { type: "cancelled"; message: string }
   | { type: "token"; content: string }
   | { type: "title"; session_id: number; title: string }
   | { type: "done" };
@@ -288,6 +297,7 @@ export async function streamChat({
   mode,
   collectionId,
   token,
+  signal,
   onEvent,
 }: {
   query: string;
@@ -295,6 +305,7 @@ export async function streamChat({
   mode?: string;
   collectionId?: number | null;
   token?: string | null;
+  signal?: AbortSignal;
   onEvent: (event: ChatStreamEvent) => void;
 }) {
   const params = new URLSearchParams({
@@ -316,6 +327,7 @@ export async function streamChat({
   const response = await fetch(`${API_BASE}/chat-stream?${params.toString()}`, {
     method: "POST",
     headers,
+    signal,
   });
 
   if (!response.ok || !response.body) {
@@ -360,6 +372,10 @@ export async function streamChat({
   let buffer = "";
 
   while (true) {
+    if (signal?.aborted) {
+      throw new DOMException("The stream was aborted.", "AbortError");
+    }
+
     const { value, done } = await reader.read();
     buffer += decoder.decode(value, { stream: !done });
     const lines = buffer.split("\n");
