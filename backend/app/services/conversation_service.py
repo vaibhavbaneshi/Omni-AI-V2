@@ -1,3 +1,4 @@
+from app.core.app_settings import get_settings
 from app.db.session import SessionLocal
 
 from app.models.message import Message
@@ -9,10 +10,13 @@ from app.models.message import Message
 def get_chat_history(
     session_id,
     user_id=None,
-    limit=5
+    limit: int | None = None,
 ):
 
     db = SessionLocal()
+
+    if limit is None:
+        limit = get_settings().CHAT_HISTORY_MESSAGE_LIMIT
 
     query = (
         db.query(Message)

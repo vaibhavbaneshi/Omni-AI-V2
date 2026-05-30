@@ -1,84 +1,72 @@
+"""Conversation summary persistence with LLM summarization for long threads."""
+
+from __future__ import annotations
+
+from app.core.app_settings import get_settings
 from app.db.session import SessionLocal
-
+from app.models.conversation_summary import ConversationSummary
 from app.models.message import Message
+from app.services.summary_service import summarize_conversation
 
-from app.models.conversation_summary import (
-    ConversationSummary
-)   
 
-# -----------------------------------
-# GENERATE SUMMARY
-# -----------------------------------
-
-def generate_summary(
-    session_id
-):
-
-    db = SessionLocal()
-
-    messages = (
-        db.query(Message)
-        .filter(
-            Message.session_id == session_id
-        )
-        .all()
-    )
-
-    summary = ""
-
+def _build_conversation_text(messages: list[Message]) -> str:
+    parts: list[str] = []
     for msg in messages:
+        role = (msg.role or "user").strip()
+        content = (msg.content or "").strip()
+        if content:
+            parts.append(f"{role}: {content}")
+    return "\n".join(parts)
 
-        summary += (
-            f"{msg.role}: {msg.content}\n"
-        )
 
-    summary = summary[-2000:]
-
-    existing = (
-        db.query(ConversationSummary)
-        .filter(
-            ConversationSummary.session_id
-            == session_id
-        )
-        .first()
-    )
-
-    if existing:
-
-        existing.summary = summary
-
-    else:
-
-        new_summary = ConversationSummary(
-            session_id=session_id,
-            summary=summary
-        )
-
-        db.add(new_summary)
-
-    db.commit()
-
-    db.close()
-
-def get_summary(
-    session_id
-):
-
+def generate_summary(session_id: int) -> None:
+    """Refresh stored summary — uses LLM when the thread exceeds configured thresholds."""
     db = SessionLocal()
-
-    summary = (
-        db.query(ConversationSummary)
-        .filter(
-            ConversationSummary.session_id
-            == session_id
+    try:
+        messages = (
+            db.query(Message)
+            .filter(Message.session_id == session_id)
+            .order_by(Message.id.asc())
+            .all()
         )
-        .first()
-    )
 
-    db.close()
+        if not messages:
+            return
 
-    if summary:
+        settings = get_settings()
+        conversation_text = _build_conversation_text(messages)
 
-        return summary.summary
+        if len(messages) >= settings.CONVERSATION_SUMMARY_MIN_MESSAGES:
+            summary = summarize_conversation(conversation_text)
+            if not summary.strip():
+                summary = conversation_text[-settings.CONVERSATION_SUMMARY_MAX_CHARS :]
+        else:
+            summary = conversation_text[-settings.CONVERSATION_SUMMARY_MAX_CHARS :]
 
-    return ""
+        existing = (
+            db.query(ConversationSummary)
+            .filter(ConversationSummary.session_id == session_id)
+            .first()
+        )
+
+        if existing:
+            existing.summary = summary
+        else:
+            db.add(ConversationSummary(session_id=session_id, summary=summary))
+
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_summary(session_id: int) -> str:
+    db = SessionLocal()
+    try:
+        summary = (
+            db.query(ConversationSummary)
+            .filter(ConversationSummary.session_id == session_id)
+            .first()
+        )
+        return summary.summary if summary and summary.summary else ""
+    finally:
+        db.close()

@@ -13,6 +13,7 @@ from app.services.title_service import (
     generate_chat_title,
     refine_chat_title,
 )
+from app.services.session_service import delete_chat_session
 
 from app.models.message import Message
 
@@ -141,6 +142,22 @@ def update_session(
     db.refresh(session)
 
     return {"id": session.id, "title": session.title}
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    deleted = delete_chat_session(
+        db,
+        user_id=current_user.id,
+        session_id=session_id,
+    )
+    if not deleted:
+        return {"error": "Session not found"}
+    return {"message": "Session deleted", "session_id": session_id}
 
 
 @router.post("/sessions/{session_id}/title/refine")
