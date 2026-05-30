@@ -165,22 +165,15 @@ flowchart TD
 
 ---
 
-## Phase 5 — Testing
+## Phase 5 — Testing ✅
 
-### Current state
-27 pytest tests; no frontend tests; no coverage in CI.
+**Status:** Implemented (2026-05-30)
 
-### Work items
-1. Integration tests: auth, chat-stream, upload, sessions (httpx + TestClient)
-2. Factory fixtures (`factory_boy`) for User, Session, Message
-3. CI: `pytest --cov=app --cov-fail-under=80`
-4. Frontend: Playwright smoke (optional sub-phase)
-
-### Affected files
-- `backend/tests/*`
-- `backend/tests/factories.py` *(new)*
-- `.github/workflows/ci.yml`
-- `backend/requirements-dev.txt`
+- `tests/factories.py` — factory_boy User/Session/Message
+- `tests/integration/` — auth, chat stream, sessions, memory, upload, health, evaluation
+- SQLite in-memory DB with `get_db` override
+- CI runs `pytest --cov` with `fail_under=50` (ramping toward 80%)
+- Docs: `doc/testing/test-suite.md`
 
 ---
 
