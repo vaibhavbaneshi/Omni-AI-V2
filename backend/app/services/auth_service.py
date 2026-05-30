@@ -1,5 +1,6 @@
 from datetime import datetime
 from datetime import timedelta
+import uuid
 
 from jose import jwt
 
@@ -38,6 +39,7 @@ def verify_password(plain_password, hashed_password):
 def create_access_token(data: dict):
     settings = get_settings()
     to_encode = data.copy()
+    to_encode.setdefault("jti", str(uuid.uuid4()))
     expire = datetime.utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(
@@ -45,3 +47,8 @@ def create_access_token(data: dict):
         settings.JWT_SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
     )
+
+
+def decode_access_token(token: str) -> dict:
+    settings = get_settings()
+    return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])

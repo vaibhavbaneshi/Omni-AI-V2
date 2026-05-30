@@ -20,6 +20,7 @@ class UserFactory(SQLAlchemyModelFactory):
     username = factory.Sequence(lambda n: f"testuser{n}")
     email = factory.LazyAttribute(lambda obj: f"{obj.username}@example.com")
     password = factory.LazyFunction(lambda: hash_password("test-password"))
+    has_password = True
 
 
 class ChatSessionFactory(SQLAlchemyModelFactory):

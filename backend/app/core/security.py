@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.services.auth_service import (
     SECRET_KEY,
-    ALGORITHM
+    ALGORITHM,
+    decode_access_token,
 )
 from app.db.session import get_db
 from app.models.user import User
@@ -31,13 +32,7 @@ def get_current_username(
     )
 
     try:
-
-        payload = jwt.decode(
-            token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM]
-        )
-
+        payload = decode_access_token(token)
         username = payload.get("sub")
 
         if username is None:
@@ -49,8 +44,22 @@ def get_current_username(
         raise credentials_exception
 
 
+def get_current_token_payload(
+    token: str = Depends(oauth2_scheme),
+) -> dict:
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+    )
+    try:
+        return decode_access_token(token)
+    except JWTError as exc:
+        raise credentials_exception from exc
+
+
 def get_current_user(
     username: str = Depends(get_current_username),
+    token_payload: dict = Depends(get_current_token_payload),
     db: Session = Depends(get_db)
 ):
 
@@ -65,5 +74,13 @@ def get_current_user(
             status_code=401,
             detail="Could not validate credentials"
         )
+
+    from app.services.settings_service import touch_user_session
+
+    touch_user_session(
+        db,
+        user_id=user.id,
+        session_jti=token_payload.get("jti"),
+    )
 
     return user

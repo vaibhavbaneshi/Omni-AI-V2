@@ -1,11 +1,13 @@
 from contextlib import asynccontextmanager
 import logging
+from pathlib import Path
 
 import app.core.chroma_client  # noqa: F401 — silence Chroma telemetry before other imports
 
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.app_settings import configure_langsmith_env, get_settings
 from app.core.health import run_health_checks, run_startup_checks
@@ -21,6 +23,7 @@ from app.api.memory_routes import router as memory_router
 from app.api.evaluation_routes import router as evaluation_router
 from app.api.analytics_routes import router as analytics_router
 from app.api.model_routes import router as model_router
+from app.api.settings_routes import router as settings_router
 from app.middleware.production import (
     InMemoryRateLimitMiddleware,
     SecurityHeadersMiddleware,
@@ -73,6 +76,10 @@ app.add_middleware(
 )
 app.add_middleware(TraceMiddleware)
 
+AVATAR_DIR = Path(__file__).resolve().parent.parent / "uploads" / "avatars"
+if AVATAR_DIR.exists():
+    app.mount("/uploads/avatars", StaticFiles(directory=str(AVATAR_DIR)), name="avatars")
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -114,3 +121,4 @@ app.include_router(memory_router)
 app.include_router(evaluation_router)
 app.include_router(analytics_router)
 app.include_router(model_router)
+app.include_router(settings_router)

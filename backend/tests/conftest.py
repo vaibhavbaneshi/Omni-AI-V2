@@ -22,6 +22,7 @@ os.environ.setdefault("ENABLE_USAGE_TRACKING", "false")
 from app.db.database import Base
 from app.db.session import get_db
 from app.models import analytics  # noqa: F401 — register analytics tables
+from app.models import user_settings  # noqa: F401 — register settings tables
 from app.models.chat_session import ChatSession
 from app.models.conversation_summary import ConversationSummary
 from app.models.document import DocumentCollection, DocumentRecord
@@ -29,6 +30,7 @@ from app.models.memory import UserMemory
 from app.models.message import Message
 from app.models.user import User
 from app.services.auth_service import create_access_token
+from app.services.settings_service import ensure_user_settings, register_user_session
 from tests.factories import UserFactory, bind_factories
 
 
@@ -63,6 +65,17 @@ def auth_context(db_session):
     user = UserFactory()
     token = create_access_token({"sub": user.username})
     headers = {"Authorization": f"Bearer {token}"}
+    ensure_user_settings(db_session, user)
+    from app.services.auth_service import decode_access_token
+
+    payload = decode_access_token(token)
+    register_user_session(
+        db_session,
+        user=user,
+        session_jti=payload["jti"],
+        user_agent="pytest",
+        ip_address="127.0.0.1",
+    )
     return {"user": user, "token": token, "headers": headers}
 
 

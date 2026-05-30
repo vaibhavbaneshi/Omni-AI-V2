@@ -195,7 +195,7 @@ def fetch_google_profile(access_token: str) -> dict[str, str]:
     }
 
 
-def get_or_create_oauth_user(db, profile: dict[str, str]):
+def get_or_create_oauth_user(db, profile: dict[str, str], *, provider: str):
     from app.models.user import User
 
     email = profile["email"]
@@ -208,12 +208,19 @@ def get_or_create_oauth_user(db, profile: dict[str, str]):
     )
 
     if user:
+        if not user.oauth_provider:
+            user.oauth_provider = provider
+            db.commit()
         return user
 
     user = User(
         username=username,
         email=email,
         password=hash_password(secrets.token_urlsafe(32)),
+        oauth_provider=provider,
+        has_password=False,
+        first_name=(profile.get("name") or "").split(" ")[0] or None,
+        last_name=" ".join((profile.get("name") or "").split(" ")[1:]) or None,
     )
     db.add(user)
     db.commit()

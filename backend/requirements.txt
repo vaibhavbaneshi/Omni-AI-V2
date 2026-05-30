@@ -24,3 +24,4 @@ httpx==0.27.2
 groq==0.22.0
 openai==1.51.2
 langsmith==0.1.129
+pyotp==2.9.0

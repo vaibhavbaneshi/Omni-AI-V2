@@ -2,14 +2,15 @@ from urllib.parse import urlencode
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.core.oauth_config import get_oauth_settings, oauth_providers_status
 from app.core.safe_errors import user_facing_message
 from app.db.session import get_db
-from app.services.auth_service import create_access_token
+from app.services.auth_service import create_access_token, decode_access_token
+from app.services.settings_service import register_user_session
 from app.services.oauth_service import (
     build_github_authorize_url,
     build_google_authorize_url,
@@ -98,6 +99,7 @@ def github_login(
 
 @router.get("/github/callback")
 def github_callback(
+    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
@@ -124,8 +126,16 @@ def github_callback(
             redirect_uri=redirect_uri,
         )
         profile = fetch_github_profile(access_token)
-        user = get_or_create_oauth_user(db, profile)
+        user = get_or_create_oauth_user(db, profile, provider="github")
         token = create_access_token(data={"sub": user.username})
+        payload = decode_access_token(token)
+        register_user_session(
+            db,
+            user=user,
+            session_jti=payload["jti"],
+            user_agent=request.headers.get("user-agent"),
+            ip_address=request.client.host if request.client else None,
+        )
 
         return _redirect_to_frontend_success(
             token=token,
@@ -165,6 +175,7 @@ def google_login(
 
 @router.get("/google/callback")
 def google_callback(
+    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
@@ -191,8 +202,16 @@ def google_callback(
             redirect_uri=redirect_uri,
         )
         profile = fetch_google_profile(access_token)
-        user = get_or_create_oauth_user(db, profile)
+        user = get_or_create_oauth_user(db, profile, provider="google")
         token = create_access_token(data={"sub": user.username})
+        payload = decode_access_token(token)
+        register_user_session(
+            db,
+            user=user,
+            session_jti=payload["jti"],
+            user_agent=request.headers.get("user-agent"),
+            ip_address=request.client.host if request.client else None,
+        )
 
         return _redirect_to_frontend_success(
             token=token,

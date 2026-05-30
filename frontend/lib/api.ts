@@ -560,4 +560,243 @@ export async function getPlatformAnalytics(token?: string | null, days = 30) {
   return apiRequest<AnalyticsOverview>(`/analytics/platform?days=${days}`, {}, token);
 }
 
+export type WorkspaceSession = {
+  id: number;
+  device_label: string;
+  ip_address?: string | null;
+  created_at?: string | null;
+  last_active_at?: string | null;
+  is_current: boolean;
+};
+
+export type WorkspaceSettings = {
+  profile: {
+    id: number;
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    bio: string;
+    avatar_url?: string | null;
+    display_name: string;
+    oauth_provider?: string | null;
+    has_password: boolean;
+    password_changed_at?: string | null;
+    totp_enabled: boolean;
+    created_at?: string | null;
+  };
+  security: {
+    totp_enabled: boolean;
+    has_password: boolean;
+    password_changed_at?: string | null;
+    sessions: WorkspaceSession[];
+  };
+  preferences: {
+    default_model: string;
+    response_style: string;
+    system_prompt: string;
+    web_search_enabled: boolean;
+    code_execution_enabled: boolean;
+    streaming_enabled: boolean;
+    theme: string;
+    font_size: string;
+    compact_mode: boolean;
+    email_notifications: boolean;
+    product_updates: boolean;
+    usage_alerts: boolean;
+  };
+  api: {
+    key: {
+      prefix?: string | null;
+      created_at?: string | null;
+      last_used_at?: string | null;
+      active: boolean;
+    };
+    rate_limits: {
+      requests_per_minute: number;
+      tokens_per_minute: number;
+      max_upload_bytes: number;
+    };
+    webhook: {
+      url: string;
+      events: string[];
+      enabled: boolean;
+    };
+  };
+  billing: {
+    plan: string;
+    status: string;
+    amount_cents: number;
+    billing_cycle: string;
+    next_billing_date?: string | null;
+    payment_method_brand?: string | null;
+    payment_method_last4?: string | null;
+    cancel_at_period_end: boolean;
+    usage: {
+      messages: { used: number; limit: number; percent: number };
+      api_calls: { used: number; limit: number; percent: number };
+      storage_gb: { used: number; limit: number; percent: number };
+      tokens: number;
+    };
+    invoices: Array<{
+      id: number;
+      date: string;
+      amount: string;
+      amount_cents: number;
+      status: string;
+      description: string;
+    }>;
+  };
+};
+
+export async function getWorkspaceSettings(token?: string | null) {
+  return apiRequest<WorkspaceSettings>("/settings", {}, token);
+}
+
+export async function updateWorkspaceProfile(
+  payload: {
+    first_name: string;
+    last_name: string;
+    email: string;
+    bio: string;
+  },
+  token?: string | null
+) {
+  return apiRequest<WorkspaceSettings["profile"]>(
+    "/settings/profile",
+    { method: "PATCH", body: JSON.stringify(payload) },
+    token
+  );
+}
+
+export async function uploadWorkspaceAvatar(file: File, token?: string | null) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiRequest<{ avatar_url: string }>(
+    "/settings/avatar",
+    { method: "POST", body: formData },
+    token
+  );
+}
+
+export async function changeWorkspacePassword(
+  payload: {
+    current_password?: string;
+    new_password: string;
+    confirm_password: string;
+  },
+  token?: string | null
+) {
+  return apiRequest<{ message: string }>(
+    "/settings/password",
+    { method: "POST", body: JSON.stringify(payload) },
+    token
+  );
+}
+
+export async function setupTwoFactor(token?: string | null) {
+  return apiRequest<{ secret: string; provisioning_uri: string; issuer: string }>(
+    "/settings/2fa/setup",
+    {},
+    token
+  );
+}
+
+export async function enableTwoFactor(code: string, token?: string | null) {
+  return apiRequest<{ message: string; totp_enabled: boolean }>(
+    "/settings/2fa/enable",
+    { method: "POST", body: JSON.stringify({ code }) },
+    token
+  );
+}
+
+export async function disableTwoFactor(
+  payload: { code: string; password?: string },
+  token?: string | null
+) {
+  return apiRequest<{ message: string; totp_enabled: boolean }>(
+    "/settings/2fa/disable",
+    { method: "POST", body: JSON.stringify(payload) },
+    token
+  );
+}
+
+export async function revokeWorkspaceSession(sessionId: number, token?: string | null) {
+  return apiRequest<{ message: string }>(
+    `/settings/sessions/${sessionId}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function revokeOtherWorkspaceSessions(token?: string | null) {
+  return apiRequest<{ message: string; revoked: number }>(
+    "/settings/sessions/revoke-others",
+    { method: "POST" },
+    token
+  );
+}
+
+export async function updateWorkspacePreferences(
+  payload: WorkspaceSettings["preferences"],
+  token?: string | null
+) {
+  return apiRequest<WorkspaceSettings["preferences"]>(
+    "/settings/preferences",
+    { method: "PATCH", body: JSON.stringify(payload) },
+    token
+  );
+}
+
+export async function regenerateWorkspaceApiKey(token?: string | null) {
+  return apiRequest<{ api_key: string; prefix: string; created_at?: string; message: string }>(
+    "/settings/api-key/regenerate",
+    { method: "POST" },
+    token
+  );
+}
+
+export async function updateWorkspaceWebhook(
+  payload: WorkspaceSettings["api"]["webhook"],
+  token?: string | null
+) {
+  return apiRequest<WorkspaceSettings["api"]["webhook"]>(
+    "/settings/webhook",
+    { method: "PUT", body: JSON.stringify(payload) },
+    token
+  );
+}
+
+export async function changeWorkspaceBillingPlan(plan: "free" | "pro", token?: string | null) {
+  return apiRequest<WorkspaceSettings["billing"]>(
+    "/settings/billing/plan",
+    { method: "POST", body: JSON.stringify({ plan }) },
+    token
+  );
+}
+
+export async function cancelWorkspaceSubscription(token?: string | null) {
+  return apiRequest<{ message: string }>("/settings/billing/cancel", { method: "POST" }, token);
+}
+
+export async function downloadWorkspaceInvoice(invoiceId: number, token?: string | null) {
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_BASE}/settings/billing/invoices/${invoiceId}/download`, {
+    headers,
+  });
+  if (!response.ok) {
+    throw new ApiError("Failed to download invoice", response.status, response.statusText);
+  }
+  return response.text();
+}
+
+export async function deleteWorkspaceAccount(confirmation: string, token?: string | null) {
+  return apiRequest<{ message: string }>(
+    "/settings/account",
+    { method: "DELETE", body: JSON.stringify({ confirmation }) },
+    token
+  );
+}
+
 export { API_BASE };
