@@ -5,7 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.app_settings import get_settings
 from app.db.database import Base
-from app.models import chat_session, conversation_summary, document, memory, message, user
+from app.models import analytics, chat_session, conversation_summary, document, memory, message, user
 
 config = context.config
 if config.config_file_name is not None:
