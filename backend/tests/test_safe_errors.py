@@ -1,6 +1,7 @@
 from sqlalchemy.exc import ProgrammingError
 
-from app.core.safe_errors import user_facing_message
+from app.core.llm import LLMProviderError
+from app.core.safe_errors import chat_facing_message, user_facing_message
 
 
 def test_user_facing_message_hides_sqlalchemy_details():
@@ -19,3 +20,13 @@ def test_user_facing_message_hides_sqlalchemy_details():
 def test_user_facing_message_keeps_short_value_errors():
     message = user_facing_message(ValueError("Invalid OAuth state"), context="test")
     assert message == "Invalid OAuth state"
+
+
+def test_chat_facing_message_hides_groq_stream_details():
+    exc = LLMProviderError(
+        "Groq streaming failed: Completions.create() got an unexpected keyword argument 'stream_options'"
+    )
+    message = chat_facing_message(exc, context="chat stream")
+    assert "stream_options" not in message
+    assert "groq" not in message.lower()
+    assert "generate a response" in message.lower()

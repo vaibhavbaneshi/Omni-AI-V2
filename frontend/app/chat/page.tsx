@@ -71,6 +71,7 @@ import { useChatStream } from "@/hooks/useChatStream";
 import { useModels } from "@/hooks/useModels";
 import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 import { getPreferredModelId, setPreferredModelId } from "@/lib/model-preferences";
+import { sanitizeChatError, sanitizeApiError } from "@/lib/user-facing-errors";
 import { isBackendSessionId } from "@/lib/chat-sessions";
 import {
   isSupportedUploadFilename,
@@ -464,10 +465,10 @@ export default function ChatPage() {
       setChats((prev) => prev.map((c) => (c.id === completedChat.id ? completedChat : c)));
     } catch (error) {
       const isAuthFailure = error instanceof ApiError && error.status === 401;
-      const message =
-        error instanceof ApiError
-          ? error.message
-          : "The response stream failed. Check the backend and try again.";
+      const message = sanitizeChatError(
+        error instanceof ApiError ? error.message : undefined,
+        error instanceof ApiError ? { status: error.status } : undefined
+      );
 
       if (isAuthFailure) {
         clearSession();
@@ -693,9 +694,10 @@ export default function ChatPage() {
     } catch (error) {
       setUploadStatus("error");
       setUploadMessage(
-        error instanceof ApiError
-          ? error.message
-          : "Upload failed. Check that the backend is running."
+        sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
+          fallback: "Upload failed. Please try again.",
+          status: error instanceof ApiError ? error.status : undefined,
+        })
       );
     }
   };
@@ -735,7 +737,12 @@ export default function ChatPage() {
       setUploadMessage(`${filename} removed from knowledge base.`);
     } catch (error) {
       setUploadStatus("error");
-      setUploadMessage(error instanceof ApiError ? error.message : "Could not remove document.");
+      setUploadMessage(
+        sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
+          fallback: "Could not remove document.",
+          status: error instanceof ApiError ? error.status : undefined,
+        })
+      );
     } finally {
       setDeletingDocument(null);
     }

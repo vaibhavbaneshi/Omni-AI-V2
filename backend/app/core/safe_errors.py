@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 logger = logging.getLogger(__name__)
 
 DEFAULT_USER_MESSAGE = "Something went wrong. Please try again."
+CHAT_USER_MESSAGE = "We couldn't generate a response. Please try again."
 
 _INTERNAL_MARKERS = (
     "sqlalchemy",
@@ -23,6 +24,13 @@ _INTERNAL_MARKERS = (
     "operationalerror",
     "parameters:",
     "background on this error",
+    "stream_options",
+    "completions.create",
+    "unexpected keyword argument",
+    "groq streaming failed",
+    "openai streaming failed",
+    "deepseek streaming failed",
+    "llmprovidererror",
 )
 
 
@@ -51,3 +59,20 @@ def user_facing_message(exc: Exception, *, context: str = "request") -> str:
         return DEFAULT_USER_MESSAGE
 
     return message
+
+
+def chat_facing_message(exc: Exception, *, context: str = "chat") -> str:
+    """Safe message for chat stream error events."""
+    from app.core.llm import LLMProviderError
+
+    logger.exception("%s failed", context, exc_info=exc)
+
+    if isinstance(exc, LLMProviderError):
+        lowered = str(exc).lower()
+        if "not configured" in lowered or "api_key" in lowered:
+            return "AI service is temporarily unavailable. Please try again later."
+        if "rate" in lowered or "429" in lowered:
+            return "The AI service is busy. Please wait a moment and try again."
+        return CHAT_USER_MESSAGE
+
+    return user_facing_message(exc, context=context)

@@ -50,6 +50,7 @@ from app.core.app_settings import get_settings
 from app.core.sanitize import sanitize_user_query
 from app.core.telemetry import get_trace_id, set_trace_context
 from app.core.llm import LLMProviderError
+from app.core.safe_errors import chat_facing_message
 from app.services.model_router import get_provider_for_route, resolve_model_route
 from app.models.user import User
 from app.models.chat_session import ChatSession
@@ -136,7 +137,9 @@ async def chat_stream(
         llm_provider = get_provider_for_route(model_route)
     except LLMProviderError as exc:
         def model_error():
-            yield json.dumps({"type": "error", "message": str(exc)}) + "\n"
+            yield json.dumps(
+                {"type": "error", "message": chat_facing_message(exc, context="model routing")}
+            ) + "\n"
             yield json.dumps({"type": "done"}) + "\n"
 
         return StreamingResponse(
@@ -306,7 +309,9 @@ async def chat_stream(
                 complete_response += token
                 yield json.dumps({"type": "token", "content": token}) + "\n"
         except Exception as exc:
-            yield json.dumps({"type": "error", "message": str(exc)}) + "\n"
+            yield json.dumps(
+                {"type": "error", "message": chat_facing_message(exc, context="chat stream")}
+            ) + "\n"
             yield json.dumps({"type": "done"}) + "\n"
             return
 

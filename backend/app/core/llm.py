@@ -20,6 +20,20 @@ from app.core.ollama import (
 logger = logging.getLogger(__name__)
 
 
+def _create_stream_completion(client, **kwargs):
+    """OpenAI-compatible streaming with graceful fallback when stream_options is unsupported."""
+    payload = dict(kwargs)
+    payload["stream"] = True
+    payload["stream_options"] = {"include_usage": True}
+    try:
+        return client.chat.completions.create(**payload)
+    except TypeError as exc:
+        if "stream_options" in str(exc):
+            payload.pop("stream_options", None)
+            return client.chat.completions.create(**payload)
+        raise
+
+
 class LLMProviderError(RuntimeError):
     """Raised when an LLM provider request fails."""
 
@@ -126,12 +140,11 @@ class GroqProvider(BaseLLMProvider):
     ) -> Iterator[str]:
         client = self._get_client()
         try:
-            stream = client.chat.completions.create(
+            stream = _create_stream_completion(
+                client,
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                stream=True,
-                stream_options={"include_usage": True},
                 timeout=timeout,
             )
         except Exception as exc:
@@ -241,12 +254,11 @@ class OpenAIProvider(BaseLLMProvider):
     ) -> Iterator[str]:
         client = self._get_client()
         try:
-            stream = client.chat.completions.create(
+            stream = _create_stream_completion(
+                client,
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                stream=True,
-                stream_options={"include_usage": True},
                 timeout=timeout,
             )
         except Exception as exc:
@@ -482,12 +494,11 @@ class DeepSeekProvider(BaseLLMProvider):
     ) -> Iterator[str]:
         client = self._get_client()
         try:
-            stream = client.chat.completions.create(
+            stream = _create_stream_completion(
+                client,
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                stream=True,
-                stream_options={"include_usage": True},
                 timeout=timeout,
             )
         except Exception as exc:

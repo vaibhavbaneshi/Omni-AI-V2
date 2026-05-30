@@ -1,3 +1,5 @@
+import { sanitizeChatError } from "@/lib/user-facing-errors";
+
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
 
@@ -393,11 +395,16 @@ export async function streamChat({
       }
     }
 
-    const message =
-      response.status === 401
-        ? "Authentication failed. Please sign in again."
-        : detail;
-    throw new ApiError(message, response.status, response.statusText);
+    throw new ApiError(
+      sanitizeChatError(
+        response.status === 401
+          ? "Authentication failed. Please sign in again."
+          : detail,
+        { status: response.status }
+      ),
+      response.status,
+      response.statusText
+    );
   }
 
   const reader = response.body.getReader();

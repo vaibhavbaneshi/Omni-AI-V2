@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { clearSession } from "@/lib/auth";
+import { sanitizeChatError } from "@/lib/user-facing-errors";
 import {
   ApiError,
   streamChat,
@@ -87,7 +88,7 @@ export function useChatStream() {
           }
 
           if (event.type === "error") {
-            setStreamError(event.message);
+            setStreamError(sanitizeChatError(event.message));
             return;
           }
 
@@ -139,10 +140,11 @@ export function useChatStream() {
 
       const message =
         error instanceof ApiError && error.status === 401
-          ? "Session expired or invalid. Please sign in again."
-          : error instanceof Error
-          ? error.message
-          : "The response stream failed.";
+          ? sanitizeChatError(error.message, { status: 401 })
+          : sanitizeChatError(
+              error instanceof Error ? error.message : undefined,
+              error instanceof ApiError ? { status: error.status } : undefined
+            );
 
       if (error instanceof ApiError && error.status === 401) {
         clearSession();
