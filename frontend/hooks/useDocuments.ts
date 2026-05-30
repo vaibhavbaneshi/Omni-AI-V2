@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createCollection,
   deleteDocument,
   listCollections,
   listDocuments,
   uploadDocument,
+  waitForDocumentIndexed,
+  ApiError,
   type DocumentCollection,
   type DocumentRecord,
 } from "@/lib/api";
@@ -13,6 +15,7 @@ import {
   isSupportedUploadFilename,
   SUPPORTED_UPLOADS_LABEL,
 } from "@/lib/supported-uploads";
+import { sanitizeApiError } from "@/lib/user-facing-errors";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
@@ -25,6 +28,8 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
   const numericSessionId =
     sessionId && isBackendSessionId(sessionId) ? Number(sessionId) : null;
+
+  const uploadInProgressRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!token) {
@@ -46,6 +51,8 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
   }, [activeCollectionId, numericSessionId, token]);
 
   useEffect(() => {
+    if (uploadInProgressRef.current) return;
+
     setDocuments([]);
     setStatus("idle");
     setMessage(null);
@@ -55,7 +62,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     }, 0);
 
     return () => window.clearTimeout(id);
-  }, [refresh, numericSessionId]);
+  }, [numericSessionId, token, refresh]);
 
   const upload = async (file: File, options?: { sessionId?: number | null }) => {
     const sessionId = options?.sessionId ?? numericSessionId;
@@ -78,23 +85,47 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
       throw new Error(errorMessage);
     }
 
+    uploadInProgressRef.current = true;
     setStatus("uploading");
     setMessage(null);
 
+    const validCollectionId =
+      activeCollectionId && collections.some((item) => item.id === activeCollectionId)
+        ? activeCollectionId
+        : null;
+
     try {
       const result = await uploadDocument(file, token, {
-        collectionId: activeCollectionId,
+        collectionId: validCollectionId,
         sessionId,
       });
+
+      if (result.indexing) {
+        setMessage("Indexing document...");
+        const indexed = await waitForDocumentIndexed(result.document_id, sessionId, token);
+        setStatus("success");
+        setMessage(
+          `Document indexed successfully (${indexed.chunks_created} chunks indexed)`
+        );
+        refresh().catch(() => undefined);
+        return { ...result, chunks_created: indexed.chunks_created, indexing: false };
+      }
+
       setStatus("success");
       setMessage(`${result.message} (${result.chunks_created} chunks indexed)`);
-      const documentResult = await listDocuments(token, { sessionId });
-      setDocuments(documentResult.documents);
+      refresh().catch(() => undefined);
       return result;
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "Upload failed.");
+      setMessage(
+        sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
+          fallback: "Upload failed. Please try again.",
+          status: error instanceof ApiError ? error.status : undefined,
+        })
+      );
       throw error;
+    } finally {
+      uploadInProgressRef.current = false;
     }
   };
 

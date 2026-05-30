@@ -1,20 +1,52 @@
+import logging
 import os
 import uuid
 
-from sentence_transformers import SentenceTransformer
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from app.core.config import settings
+from app.core.app_settings import get_settings
 from app.core.chroma_client import get_or_create_collection
 from app.services.document_loaders import load_document
+from app.services.embedding_service import encode_texts
 
-embedding_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
-collection = get_or_create_collection(settings.COLLECTION_NAME)
+logger = logging.getLogger(__name__)
 
 
-def chunk_text(text: str):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-    return splitter.split_text(text)
+def get_document_collection():
+    settings = get_settings()
+    return get_or_create_collection(settings.COLLECTION_NAME)
+
+
+def chunk_text(text: str) -> list[str]:
+    settings = get_settings()
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.INGEST_CHUNK_SIZE,
+        chunk_overlap=settings.INGEST_CHUNK_OVERLAP,
+        length_function=len,
+    )
+    raw_chunks = splitter.split_text(text)
+
+    seen: set[str] = set()
+    chunks: list[str] = []
+    for chunk in raw_chunks:
+        normalized = chunk.strip()
+        if len(normalized) < 32:
+            continue
+        dedupe_key = normalized.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        chunks.append(normalized)
+
+    if len(chunks) > settings.INGEST_MAX_CHUNKS:
+        logger.warning(
+            "Truncating document from %s to %s chunks (INGEST_MAX_CHUNKS)",
+            len(chunks),
+            settings.INGEST_MAX_CHUNKS,
+        )
+        chunks = chunks[: settings.INGEST_MAX_CHUNKS]
+
+    return chunks
 
 
 def store_chunks(
@@ -26,31 +58,37 @@ def store_chunks(
     session_id=None,
     document_id=None,
 ):
-    embeddings = embedding_model.encode(chunks).tolist()
+    if not chunks:
+        return
 
-    ids = [str(uuid.uuid4()) for _ in chunks]
+    settings = get_settings()
+    collection = get_document_collection()
+    batch_size = max(1, settings.CHROMA_ADD_BATCH_SIZE)
 
-    metadatas = [
-        {
-            "source": filename,
-            "filename": filename,
-            "user_id": str(user_id),
-            "workspace_id": workspace_id,
-            "collection_id": str(collection_id or "default"),
-            "session_id": str(session_id or ""),
-            "document_id": str(document_id or ""),
-            "chunk_index": index,
-            "embedding_version": "bge-small-en-v1.5",
-        }
-        for index, _ in enumerate(chunks)
-    ]
-
-    collection.add(
-        documents=chunks,
-        embeddings=embeddings,
-        ids=ids,
-        metadatas=metadatas,
-    )
+    for start in range(0, len(chunks), batch_size):
+        batch = chunks[start : start + batch_size]
+        embeddings = encode_texts(batch)
+        ids = [str(uuid.uuid4()) for _ in batch]
+        metadatas = [
+            {
+                "source": filename,
+                "filename": filename,
+                "user_id": str(user_id),
+                "workspace_id": workspace_id,
+                "collection_id": str(collection_id or "default"),
+                "session_id": str(session_id or ""),
+                "document_id": str(document_id or ""),
+                "chunk_index": start + index,
+                "embedding_version": settings.EMBEDDING_MODEL,
+            }
+            for index, _ in enumerate(batch)
+        ]
+        collection.add(
+            documents=batch,
+            embeddings=embeddings,
+            ids=ids,
+            metadatas=metadatas,
+        )
 
 
 def process_document(
@@ -64,9 +102,11 @@ def process_document(
 ):
     text = load_document(file_path)
     chunks = chunk_text(text)
+    if not chunks:
+        raise ValueError("No indexable text chunks were produced from the document.")
 
     store_chunks(
-        chunks=chunks,
+        chunks,
         filename=filename,
         user_id=user_id,
         workspace_id=workspace_id,

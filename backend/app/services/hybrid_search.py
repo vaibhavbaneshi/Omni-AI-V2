@@ -1,25 +1,14 @@
 from rank_bm25 import BM25Okapi
 
-from sentence_transformers import (
-    SentenceTransformer
-)
-
-from app.core.config import settings
+from app.core.app_settings import get_settings
 from app.core.chroma_client import get_or_create_collection
+from app.services.embedding_service import encode_query
 
 # -----------------------------------
 # CHROMADB
 # -----------------------------------
 
-collection = get_or_create_collection(settings.COLLECTION_NAME)
-
-# -----------------------------------
-# EMBEDDING MODEL
-# -----------------------------------
-
-embedding_model = SentenceTransformer(
-    "BAAI/bge-small-en-v1.5"
-)
+collection = get_or_create_collection(get_settings().COLLECTION_NAME)
 
 # -----------------------------------
 # GET ALL DOCS
@@ -151,9 +140,7 @@ def semantic_search(
     session_id=None,
 ):
 
-    embedding = embedding_model.encode(
-        query
-    ).tolist()
+    embedding = encode_query(query)
 
     where_filter = build_filter(
         user_id=user_id,
@@ -221,9 +208,7 @@ def semantic_search_with_metadata(
     session_id=None,
 ):
 
-    embedding = embedding_model.encode(
-        query
-    ).tolist()
+    embedding = encode_query(query)
 
     where_filter = build_filter(
         user_id=user_id,

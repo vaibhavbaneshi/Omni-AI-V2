@@ -10,7 +10,7 @@ from app.models.chat_session import ChatSession
 from app.models.conversation_summary import ConversationSummary
 from app.models.document import DocumentRecord
 from app.models.message import Message
-from app.services.documents_services import collection as chroma_collection
+from app.services.documents_services import get_document_collection
 
 
 def delete_chat_session(
@@ -48,6 +48,7 @@ def delete_chat_session(
                 pass
 
         try:
+            chroma_collection = get_document_collection()
             matches = chroma_collection.get(
                 where={
                     "$and": [

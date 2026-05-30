@@ -1,9 +1,5 @@
 import logging
 
-from sentence_transformers import (
-    SentenceTransformer
-)
-
 from app.core.config import settings
 from app.core.chroma_client import get_or_create_collection
 from app.services.llm_invoke import invoke_generate, invoke_stream
@@ -17,14 +13,6 @@ logger = logging.getLogger(__name__)
 
 from app.services.conversation_service import (
     get_chat_history
-)
-
-# -----------------------------------
-# EMBEDDING MODEL
-# -----------------------------------
-
-embedding_model = SentenceTransformer(
-    "BAAI/bge-small-en-v1.5"
 )
 
 # -----------------------------------
@@ -173,8 +161,9 @@ def retrieve_session_document_context(
 ):
     """Load indexed chunks for all PDFs attached to this chat session."""
     from app.models.document import DocumentRecord
-    from app.services.documents_services import collection as chroma_collection
+    from app.services.documents_services import get_document_collection
 
+    chroma_collection = get_document_collection()
     documents = (
         db.query(DocumentRecord)
         .filter(

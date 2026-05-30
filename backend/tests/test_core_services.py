@@ -54,8 +54,9 @@ def test_get_chat_history_respects_limit(db_session):
     assert history.count("user:") == 3
 
 
-@patch("app.services.session_service.chroma_collection")
-def test_delete_chat_session_removes_messages(mock_chroma, db_session):
+@patch("app.services.session_service.get_document_collection")
+def test_delete_chat_session_removes_messages(mock_get_collection, db_session):
+    mock_chroma = mock_get_collection.return_value
     mock_chroma.get.return_value = {"ids": []}
     session = ChatSessionFactory()
     MessageFactory(session=session, role="user", content="delete me")

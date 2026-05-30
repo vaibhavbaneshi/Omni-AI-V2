@@ -3,17 +3,15 @@ import time
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     UploadFile,
     File,
     HTTPException,
-    Depends
+    Depends,
 )
 
 from app.services.document_loaders import DocumentLoadError
-from app.services.documents_services import (
-    process_document,
-    collection,
-)
+from app.services.documents_services import get_document_collection, process_document
 
 from app.core.security import (
     get_current_user
@@ -21,6 +19,7 @@ from app.core.security import (
 from app.core.app_settings import get_settings
 from app.core.upload_validation import validate_document_upload
 from app.core.telemetry import traced_span
+from app.services.ingestion_service import ingest_document_record
 from app.services.usage_tracking_service import record_ingestion_event
 from app.db.session import get_db
 from app.models.document import DocumentCollection, DocumentRecord
@@ -34,6 +33,7 @@ UPLOAD_DIR = "uploads"
 @router.post("/upload")
 
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     workspace_id: str = "default",
     collection_id: int | None = None,
@@ -129,6 +129,18 @@ async def upload_document(
     db.commit()
     db.refresh(document)
 
+    settings = get_settings()
+    if settings.INGEST_IN_BACKGROUND:
+        background_tasks.add_task(ingest_document_record, document.id)
+        return {
+            "message": "Document uploaded. Indexing in background.",
+            "filename": safe_name,
+            "chunks_created": 0,
+            "indexing": True,
+            "collection_id": collection_record.id,
+            "document_id": document.id,
+        }
+
     ingest_started = time.perf_counter()
     try:
         with traced_span(
@@ -182,6 +194,7 @@ async def upload_document(
         "message": "Document uploaded successfully",
         "filename": safe_name,
         "chunks_created": chunk_count,
+        "indexing": False,
         "collection_id": collection_record.id,
         "document_id": document.id
     }
@@ -253,7 +266,7 @@ def delete_document(
     if os.path.exists(document.storage_path):
         os.remove(document.storage_path)
 
-    matches = collection.get(
+    matches = get_document_collection().get(
         where={
             "$and": [
                 {"source": safe_name},
@@ -266,7 +279,7 @@ def delete_document(
     ids = matches.get("ids", [])
 
     if ids:
-        collection.delete(
+        get_document_collection().delete(
             ids=ids
         )
 

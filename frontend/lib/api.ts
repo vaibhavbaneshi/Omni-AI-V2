@@ -83,6 +83,7 @@ export type UploadDocumentResponse = {
   chunks_created: number;
   collection_id: number;
   document_id: number;
+  indexing?: boolean;
 };
 
 export async function uploadDocument(
@@ -104,14 +105,30 @@ export async function uploadDocument(
     params.set("session_id", String(options.sessionId));
   }
 
-  return apiRequest<UploadDocumentResponse>(
-    `/upload${params.size ? `?${params.toString()}` : ""}`,
-    {
-      method: "POST",
-      body: formData,
-    },
-    token
-  );
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 120_000);
+
+  try {
+    return await apiRequest<UploadDocumentResponse>(
+      `/upload${params.size ? `?${params.toString()}` : ""}`,
+      {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      },
+      token
+    );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(
+        "Upload timed out. Try a smaller file or check that the backend is running.",
+        408
+      );
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export type DocumentRecord = {
@@ -137,6 +154,29 @@ export async function listDocuments(
   }
   const suffix = params.size ? `?${params.toString()}` : "";
   return apiRequest<{ documents: DocumentRecord[] }>(`/documents${suffix}`, {}, token);
+}
+
+export async function waitForDocumentIndexed(
+  documentId: number,
+  sessionId: number,
+  token?: string | null,
+  maxWaitMs = 180_000
+) {
+  const started = Date.now();
+
+  while (Date.now() - started < maxWaitMs) {
+    const { documents } = await listDocuments(token, { sessionId });
+    const document = documents.find((item) => item.id === documentId);
+    if (document && document.chunks_created > 0) {
+      return document;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+  }
+
+  throw new ApiError(
+    "Document indexing is taking longer than expected. Try refreshing in a moment.",
+    408
+  );
 }
 
 export async function deleteDocument(filename: string, token?: string | null) {

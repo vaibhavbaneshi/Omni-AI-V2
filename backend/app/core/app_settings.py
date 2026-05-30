@@ -63,6 +63,15 @@ class AppSettings(BaseSettings):
     CHROMA_DB_PATH: str = "./chroma_db"
     COLLECTION_NAME: str = "omniai_docs"
 
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+    EMBEDDING_BATCH_SIZE: int = 64
+    INGEST_CHUNK_SIZE: int = 1200
+    INGEST_CHUNK_OVERLAP: int = 150
+    INGEST_MAX_CHUNKS: int = 400
+    CHROMA_ADD_BATCH_SIZE: int = 128
+    PRELOAD_EMBEDDING_MODEL: bool = True
+    INGEST_IN_BACKGROUND: bool = True
+
     DATABASE_URL: str = ""
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: str = "5432"

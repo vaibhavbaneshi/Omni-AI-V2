@@ -30,7 +30,6 @@ import {
   ThumbsDown,
   Share,
   ArrowUp,
-  Mic,
   Square,
   Hash,
   Folder,
@@ -243,12 +242,15 @@ export default function ChatPage() {
 
   const selectChat = useCallback(
     (chat: Chat) => {
+      setAttachedFile(null);
+      setUploadStatus("idle");
+      setUploadMessage(null);
       setActiveChat(chat);
       if (!isDesktop) {
         closeSidebar();
       }
     },
-    [closeSidebar, isDesktop]
+    [closeSidebar, isDesktop, setUploadMessage, setUploadStatus]
   );
 
   useEffect(() => {
@@ -262,14 +264,6 @@ export default function ChatPage() {
       window.history.replaceState(null, "", nextUrl);
     }
   }, [activeChat]);
-
-  useEffect(() => {
-    if (!activeChat?.id) return;
-    setAttachedFile(null);
-    setUploadStatus("idle");
-    setUploadMessage(null);
-    setIsDraggingFile(false);
-  }, [activeChat?.id, setUploadMessage, setUploadStatus]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (!shouldStickToBottomRef.current) return;
@@ -685,12 +679,12 @@ export default function ChatPage() {
     }
 
     setAttachedFile(file);
-    setUploadStatus("uploading");
     setUploadMessage(null);
 
     try {
       const chat = await ensureBackendChat(stripUploadExtension(file.name));
       await uploadWorkspaceDocument(file, { sessionId: Number(chat.id) });
+      setAttachedFile(null);
     } catch (error) {
       setUploadStatus("error");
       setUploadMessage(
@@ -1503,7 +1497,7 @@ export default function ChatPage() {
                 <textarea
                   ref={inputRef}
                   placeholder="Message Omni AI..."
-                  className="w-full min-h-[52px] max-h-[32dvh] resize-none bg-transparent px-3 py-3 pr-28 text-[15px] placeholder:text-muted-foreground/40 focus:outline-none leading-relaxed sm:min-h-[56px] sm:px-5 sm:py-4 sm:pr-40"
+                  className="w-full min-h-[52px] max-h-[32dvh] resize-none bg-transparent px-3 py-3 pr-20 text-[15px] placeholder:text-muted-foreground/40 focus:outline-none leading-relaxed sm:min-h-[56px] sm:px-5 sm:py-4 sm:pr-28"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -1537,19 +1531,6 @@ export default function ChatPage() {
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Attach</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
-                        onClick={() => setInput((prev) => prev || "Transcribe this voice note")}
-                      >
-                        <Mic className="size-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Voice</TooltipContent>
                   </Tooltip>
                   <Button
                     size="icon"

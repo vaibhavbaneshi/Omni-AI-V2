@@ -50,6 +50,17 @@ async def lifespan(app: FastAPI):
         )
     startup = run_startup_checks()
     logger.info("Startup complete: %s", startup.get("status"))
+    if settings.PRELOAD_EMBEDDING_MODEL:
+        import threading
+
+        threading.Thread(
+            target=lambda: __import__(
+                "app.services.embedding_service",
+                fromlist=["preload_embedding_model"],
+            ).preload_embedding_model(),
+            name="embedding-preload",
+            daemon=True,
+        ).start()
     yield
     logger.info("Shutting down %s", settings.APP_NAME)
 
