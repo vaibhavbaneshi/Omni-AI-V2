@@ -21,7 +21,8 @@ from app.core.security import (
 from app.core.app_settings import get_settings
 from app.core.upload_validation import sanitize_upload_filename, validate_document_upload
 from app.core.telemetry import traced_span
-from app.services.ingestion_service import ingest_document_record
+from app.services.indexing_progress import document_status_payload, update_indexing_progress
+from app.services.ingestion_service import detect_stale_indexing, ingest_document_record
 from app.services.usage_tracking_service import record_ingestion_event
 from app.services.file_scanner import FileScanError, scan_uploaded_file
 from app.services.security_audit_service import audit_log
@@ -207,12 +208,14 @@ async def upload_document(
         storage_path=file_path,
         file_size=file_size,
         chunks_created=0,
+        indexing_stage="queued",
     )
     db.add(document)
     db.commit()
     db.refresh(document)
 
     if settings.INGEST_IN_BACKGROUND:
+        update_indexing_progress(db, document.id, stage="queued", mark_started=True)
         background_tasks.add_task(ingest_document_record, document.id)
         logger.info(
             "Upload queued for background indexing document_id=%s filename=%s size=%s user_id=%s session_id=%s",
@@ -355,8 +358,7 @@ def list_documents(
     return {
         "documents": [
             {
-                "id": document.id,
-                "filename": document.filename,
+                **document_status_payload(document),
                 "size": document.file_size
                 or (
                     os.path.getsize(document.storage_path)
@@ -366,8 +368,6 @@ def list_documents(
                 "updated_at": document.created_at.timestamp() if document.created_at else 0,
                 "collection_id": document.collection_id,
                 "session_id": document.session_id,
-                "chunks_created": document.chunks_created,
-                "status": "ready" if document.chunks_created > 0 else "indexing",
             }
             for document in records
         ]
@@ -418,12 +418,12 @@ def get_document_status(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    return {
-        "id": document.id,
-        "filename": document.filename,
-        "chunks_created": document.chunks_created,
-        "status": "ready" if document.chunks_created > 0 else "indexing",
-    }
+    payload = document_status_payload(document)
+    stale_message = detect_stale_indexing(document)
+    if stale_message and payload["status"] == "indexing":
+        payload["stale"] = True
+        payload["stale_message"] = stale_message
+    return payload
 
 
 @router.delete("/documents/id/{document_id}")

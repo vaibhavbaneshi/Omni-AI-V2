@@ -196,6 +196,27 @@ export async function uploadDocument(
   }
 }
 
+export type DocumentIndexingStage =
+  | "queued"
+  | "loading"
+  | "chunking"
+  | "embedding"
+  | "vector_store"
+  | "finalizing"
+  | "ready"
+  | "failed";
+
+export const INDEXING_STAGE_LABELS: Record<DocumentIndexingStage, string> = {
+  queued: "Queued for indexing...",
+  loading: "Loading document...",
+  chunking: "Chunking text...",
+  embedding: "Generating embeddings...",
+  vector_store: "Storing vectors...",
+  finalizing: "Finalizing...",
+  ready: "Ready",
+  failed: "Indexing failed",
+};
+
 export type DocumentRecord = {
   id: number;
   filename: string;
@@ -204,15 +225,33 @@ export type DocumentRecord = {
   collection_id: number;
   session_id?: number | null;
   chunks_created: number;
-  status?: "indexing" | "ready";
+  embeddings_completed?: number;
+  indexing_stage?: DocumentIndexingStage;
+  indexing_error?: string | null;
+  elapsed_seconds?: number | null;
+  stale?: boolean;
+  stale_message?: string;
+  status?: "indexing" | "ready" | "failed";
 };
 
 export function isDocumentReady(document: DocumentRecord): boolean {
-  return document.status === "ready" || document.chunks_created > 0;
+  return document.status === "ready" || document.indexing_stage === "ready" || document.chunks_created > 0;
+}
+
+export function isDocumentFailed(document: DocumentRecord): boolean {
+  return document.status === "failed" || document.indexing_stage === "failed";
 }
 
 export function isDocumentIndexing(document: DocumentRecord): boolean {
-  return !isDocumentReady(document);
+  return !isDocumentReady(document) && !isDocumentFailed(document);
+}
+
+export function indexingStageLabel(document: DocumentRecord): string {
+  if (isDocumentFailed(document)) {
+    return document.indexing_error || INDEXING_STAGE_LABELS.failed;
+  }
+  const stage = document.indexing_stage || "queued";
+  return INDEXING_STAGE_LABELS[stage] || INDEXING_STAGE_LABELS.queued;
 }
 
 export async function listDocuments(
@@ -235,7 +274,13 @@ export async function getDocumentStatus(documentId: number, token?: string | nul
     id: number;
     filename: string;
     chunks_created: number;
-    status: "indexing" | "ready";
+    embeddings_completed: number;
+    indexing_stage: DocumentIndexingStage;
+    indexing_error?: string | null;
+    elapsed_seconds?: number | null;
+    stale?: boolean;
+    stale_message?: string;
+    status: "indexing" | "ready" | "failed";
   }>(`/documents/${documentId}/status`, {}, token);
 }
 

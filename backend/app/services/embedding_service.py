@@ -73,7 +73,7 @@ def _encode_openai(texts: list[str]) -> list[list[float]]:
     return all_vectors
 
 
-def _encode_huggingface(texts: list[str]) -> list[list[float]]:
+def _encode_huggingface(texts: list[str], telemetry=None) -> list[list[float]]:
     settings = get_settings()
     api_key = settings.huggingface_api_key
     if not api_key:
@@ -86,16 +86,52 @@ def _encode_huggingface(texts: list[str]) -> list[list[float]]:
     api_batch = max(1, min(settings.EMBEDDING_BATCH_SIZE, 32))
     all_vectors: list[list[float]] = []
 
+    import time
+
     with httpx.Client(timeout=120.0) as client:
         for start in range(0, len(texts), api_batch):
             batch = texts[start : start + api_batch]
-            response = client.post(
-                url,
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={"inputs": batch, "options": {"wait_for_model": True}},
-            )
-            response.raise_for_status()
-            payload = response.json()
+            batch_started = time.perf_counter()
+            last_error: Exception | None = None
+
+            for attempt in range(1, 4):
+                try:
+                    response = client.post(
+                        url,
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        json={"inputs": batch, "options": {"wait_for_model": True}},
+                    )
+                    if response.status_code in {503, 429}:
+                        raise httpx.HTTPStatusError(
+                            "HF model warming or rate limited",
+                            request=response.request,
+                            response=response,
+                        )
+                    response.raise_for_status()
+                    payload = response.json()
+                    break
+                except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
+                    last_error = exc
+                    if telemetry:
+                        telemetry.log(
+                            "EMBEDDING_RETRY",
+                            level=logging.WARNING,
+                            attempt=attempt,
+                            error=str(exc),
+                        )
+                    time.sleep(min(2 ** attempt, 8))
+            else:
+                raise RuntimeError(
+                    f"HuggingFace embedding failed after retries: {last_error}"
+                ) from last_error
+
+            elapsed = time.perf_counter() - batch_started
+            if elapsed > 60:
+                logger.warning(
+                    "HuggingFace embedding batch slow. Elapsed: %.1fs batch_size=%s",
+                    elapsed,
+                    len(batch),
+                )
 
             if len(batch) == 1 and payload and isinstance(payload[0], (int, float)):
                 batch_vectors = [payload]
@@ -145,16 +181,59 @@ def preload_embedding_model() -> None:
         logger.warning("Embedding model preload failed: %s", exc)
 
 
-def encode_texts(texts: list[str]) -> list[list[float]]:
+def encode_texts(
+    texts: list[str],
+    *,
+    telemetry=None,
+    batch_index: int | None = None,
+    batch_total: int | None = None,
+) -> list[list[float]]:
     if not texts:
         return []
 
-    provider = get_settings().EMBEDDING_PROVIDER
+    settings = get_settings()
+    provider = settings.EMBEDDING_PROVIDER
+    model_label = settings.embedding_model_label
+
+    if telemetry:
+        telemetry.log(
+            "EMBEDDING_START",
+            provider=provider,
+            model=model_label,
+            batch_index=batch_index,
+            batch_total=batch_total,
+            text_count=len(texts),
+        )
+
+    import time
+
+    started = time.perf_counter()
     if provider == "openai":
-        return _encode_openai(texts)
-    if provider == "huggingface":
-        return _encode_huggingface(texts)
-    return _encode_local(texts)
+        vectors = _encode_openai(texts)
+    elif provider == "huggingface":
+        vectors = _encode_huggingface(texts, telemetry=telemetry)
+    else:
+        vectors = _encode_local(texts)
+
+    elapsed = time.perf_counter() - started
+    if telemetry:
+        telemetry.log(
+            "EMBEDDING_COMPLETE",
+            provider=provider,
+            model=model_label,
+            vector_count=len(vectors),
+            duration_ms=round(elapsed * 1000, 1),
+        )
+    if elapsed > 60:
+        logger.warning(
+            "Embedding generation taking unusually long. Elapsed: %.1fs provider=%s model=%s count=%s",
+            elapsed,
+            provider,
+            model_label,
+            len(texts),
+        )
+
+    return vectors
 
 
 def encode_query(text: str) -> list[float]:

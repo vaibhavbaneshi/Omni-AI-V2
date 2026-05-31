@@ -64,6 +64,7 @@ import {
   logoutSession,
   updateChatSessionTitle,
   type DocumentRecord,
+  indexingStageLabel,
   type StreamMeta,
   type StreamSource,
 } from "@/lib/api";
@@ -1800,7 +1801,9 @@ function DocumentChip({
       ) : (
         <FileIcon className="size-3 shrink-0 text-blue-300" />
       )}
-      <span className="truncate">{document.filename}</span>
+      <span className="truncate" title={indexing ? indexingStageLabel(document) : document.filename}>
+        {indexing ? indexingStageLabel(document) : document.filename}
+      </span>
       {!indexing && onDelete && (
         <button
           type="button"

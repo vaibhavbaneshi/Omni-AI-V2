@@ -111,6 +111,32 @@ class DocumentRecord(Base):
         default="bge-small-en-v1.5"
     )
 
+    indexing_stage = Column(
+        String,
+        nullable=False,
+        default="queued",
+    )
+
+    indexing_error = Column(
+        String,
+        nullable=True,
+    )
+
+    indexing_started_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
+    indexing_updated_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
+    embeddings_completed = Column(
+        Integer,
+        default=0,
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow

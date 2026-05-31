@@ -3,6 +3,8 @@ import {
   createCollection,
   deleteDocumentById,
   getDocumentStatus,
+  indexingStageLabel,
+  isDocumentFailed,
   isDocumentIndexing,
   isDocumentReady,
   listCollections,
@@ -20,10 +22,44 @@ import {
 import { sanitizeApiError } from "@/lib/user-facing-errors";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const STALE_INDEXING_MS = 15 * 60 * 1000;
 
 function belongsToSession(document: DocumentRecord, sessionId: number | null): boolean {
   if (!sessionId) return false;
   return document.session_id === sessionId;
+}
+
+function applyStatusUpdate(document: DocumentRecord, update: Awaited<ReturnType<typeof getDocumentStatus>>): DocumentRecord {
+  if (update.status === "failed") {
+    return {
+      ...document,
+      status: "failed",
+      indexing_stage: "failed",
+      indexing_error: update.indexing_error,
+      chunks_created: update.chunks_created,
+      embeddings_completed: update.embeddings_completed,
+    };
+  }
+  if (update.status === "ready" || update.chunks_created > 0) {
+    return {
+      ...document,
+      chunks_created: update.chunks_created,
+      embeddings_completed: update.embeddings_completed,
+      indexing_stage: "ready",
+      status: "ready",
+    };
+  }
+  return {
+    ...document,
+    chunks_created: update.chunks_created,
+    embeddings_completed: update.embeddings_completed,
+    indexing_stage: update.indexing_stage,
+    indexing_error: update.indexing_error,
+    elapsed_seconds: update.elapsed_seconds,
+    stale: update.stale,
+    stale_message: update.stale_message,
+    status: "indexing",
+  };
 }
 
 export function useDocuments(token?: string | null, sessionId?: string | null) {
@@ -41,6 +77,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
   const currentSessionIdRef = useRef<number | null>(numericSessionId);
   const pollTimerRef = useRef<number | null>(null);
+  const indexingStartedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     currentSessionIdRef.current = numericSessionId;
@@ -75,6 +112,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     setDocuments([]);
     setStatus("idle");
     setMessage(null);
+    indexingStartedAtRef.current = null;
 
     if (pollTimerRef.current) {
       window.clearInterval(pollTimerRef.current);
@@ -97,13 +135,6 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
       (document) => isDocumentIndexing(document) && belongsToSession(document, numericSessionId)
     );
     if (pending.length === 0) {
-      if (status === "indexing" && uploadTargetSessionId === numericSessionId) {
-        setStatus("success");
-      }
-      return;
-    }
-
-    if (uploadTargetSessionId !== numericSessionId) {
       return;
     }
 
@@ -113,62 +144,89 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
       pending.map(async (document) => {
         try {
           return await getDocumentStatus(document.id, token);
-        } catch {
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 404) {
+            return { id: document.id, missing: true as const };
+          }
           return null;
         }
       })
     );
 
     let becameReady = false;
+    let becameFailed = false;
+    let progressMessage = "";
 
-    setDocuments((current) =>
-      current
+    setDocuments((current) => {
+      const next = current
         .filter((document) => belongsToSession(document, numericSessionId))
-        .map((document) => {
-          const update = updates.find((item) => item?.id === document.id);
-          if (!update) return document;
-          if (update.status === "ready" || update.chunks_created > 0) {
-            becameReady = true;
-            return {
-              ...document,
-              chunks_created: update.chunks_created,
-              status: "ready" as const,
-            };
+        .flatMap((document) => {
+          const update = updates.find((item) => item && "id" in item && item.id === document.id);
+          if (!update) return [document];
+          if ("missing" in update && update.missing) {
+            becameFailed = true;
+            return [];
           }
-          return document;
-        })
-    );
+          if (!update || !("status" in update)) return [document];
+
+          const merged = applyStatusUpdate(document, update);
+          if (merged.status === "ready") becameReady = true;
+          if (merged.status === "failed") becameFailed = true;
+          if (merged.status === "indexing") {
+            progressMessage = `${merged.filename}: ${indexingStageLabel(merged)}`;
+            if (merged.stale_message) {
+              progressMessage = merged.stale_message;
+            }
+          }
+          return [merged];
+        });
+      return next;
+    });
 
     if (currentSessionIdRef.current !== numericSessionId) {
       return;
     }
 
     if (becameReady) {
-      const readyCount = documents.filter(
-        (document) => isDocumentReady(document) && belongsToSession(document, numericSessionId)
-      ).length;
-      setMessage(`${readyCount || 1} document${readyCount === 1 ? "" : "s"} ready in this chat.`);
+      setMessage("Document ready in this chat.");
       setStatus("success");
       setUploadTargetSessionId(null);
+      indexingStartedAtRef.current = null;
+      return;
+    }
+
+    if (becameFailed) {
+      setMessage("Document indexing failed. Check backend logs or try uploading again.");
+      setStatus("error");
+      setUploadTargetSessionId(null);
+      indexingStartedAtRef.current = null;
+      return;
+    }
+
+    if (progressMessage) {
+      setMessage(progressMessage);
     } else {
       const names = pending.map((document) => document.filename).join(", ");
       setMessage(`Indexing ${names}...`);
     }
-  }, [documents, numericSessionId, status, token, uploadTargetSessionId]);
+
+    if (
+      indexingStartedAtRef.current &&
+      Date.now() - indexingStartedAtRef.current > STALE_INDEXING_MS
+    ) {
+      setStatus("error");
+      setMessage(
+        "Indexing is taking longer than expected. Check Railway backend logs for [EMBEDDING_*] or [ERROR] entries."
+      );
+    }
+  }, [documents, numericSessionId, token]);
 
   useEffect(() => {
-    if (!token || !numericSessionId || documents.every(isDocumentReady)) {
-      if (pollTimerRef.current) {
-        window.clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-      return;
-    }
-
     const hasPendingForSession = documents.some(
       (document) => isDocumentIndexing(document) && belongsToSession(document, numericSessionId)
     );
-    if (!hasPendingForSession) {
+
+    if (!token || !numericSessionId || !hasPendingForSession) {
       if (pollTimerRef.current) {
         window.clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
@@ -214,11 +272,12 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     }
 
     setUploadTargetSessionId(targetSessionId);
+    indexingStartedAtRef.current = Date.now();
 
     const showProgressForTarget = currentSessionIdRef.current === targetSessionId;
     if (showProgressForTarget) {
       setStatus("uploading");
-      setMessage(null);
+      setMessage("Uploading file...");
     }
 
     const validCollectionId =
@@ -246,6 +305,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
           collection_id: result.collection_id,
           session_id: targetSessionId,
           chunks_created: result.chunks_created,
+          indexing_stage: result.indexing ? "queued" : "ready",
           status: result.indexing ? ("indexing" as const) : ("ready" as const),
         };
 
@@ -259,13 +319,14 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
       if (result.indexing || uploadedDocument.chunks_created === 0) {
         setStatus("indexing");
-        setMessage(`Indexing ${result.filename}...`);
+        setMessage(`${result.filename}: Queued for indexing...`);
         return { ...result, indexing: true };
       }
 
       setStatus("success");
       setMessage(`${result.message} (${result.chunks_created} chunks indexed)`);
       setUploadTargetSessionId(null);
+      indexingStartedAtRef.current = null;
       return result;
     } catch (error) {
       if (currentSessionIdRef.current === targetSessionId) {
@@ -278,6 +339,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
         );
       }
       setUploadTargetSessionId(null);
+      indexingStartedAtRef.current = null;
       throw error;
     }
   };
@@ -297,6 +359,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
   const readyDocuments = documents.filter(isDocumentReady);
   const indexingDocuments = documents.filter(isDocumentIndexing);
+  const failedDocuments = documents.filter(isDocumentFailed);
   const isUploadActiveForSession =
     uploadTargetSessionId !== null &&
     uploadTargetSessionId === numericSessionId &&
@@ -306,6 +369,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     documents,
     readyDocuments,
     indexingDocuments,
+    failedDocuments,
     collections,
     activeCollectionId,
     setActiveCollectionId,

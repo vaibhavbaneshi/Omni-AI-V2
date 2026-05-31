@@ -4,12 +4,15 @@ import os
 import uuid
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from sqlalchemy.orm import Session
 
 from app.core.app_settings import get_settings
 from app.core.chroma_client import get_or_create_collection
 from app.core.sanitize import detect_prompt_injection
 from app.services.document_loaders import load_document
 from app.services.embedding_service import encode_texts
+from app.services.indexing_progress import update_indexing_progress
+from app.services.ingestion_telemetry import IngestionContext
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,8 @@ def store_chunks(
     collection_id=None,
     session_id=None,
     document_id=None,
+    db: Session | None = None,
+    telemetry: IngestionContext | None = None,
 ):
     if not chunks:
         return
@@ -66,10 +71,41 @@ def store_chunks(
     settings = get_settings()
     collection = get_document_collection()
     batch_size = max(1, settings.CHROMA_ADD_BATCH_SIZE)
+    total = len(chunks)
 
-    for start in range(0, len(chunks), batch_size):
+    if db is not None and document_id is not None:
+        update_indexing_progress(db, document_id, stage="embedding")
+
+    for start in range(0, total, batch_size):
         batch = chunks[start : start + batch_size]
-        embeddings = encode_texts(batch)
+        batch_num = start // batch_size + 1
+        batch_total = (total + batch_size - 1) // batch_size
+
+        if telemetry:
+            telemetry.log(
+                "EMBEDDING_PROGRESS",
+                batch=batch_num,
+                batch_total=batch_total,
+                processed=start,
+                remaining=max(total - start, 0),
+                batch_size=len(batch),
+            )
+
+        embeddings = encode_texts(
+            batch,
+            telemetry=telemetry,
+            batch_index=batch_num,
+            batch_total=batch_total,
+        )
+
+        if db is not None and document_id is not None:
+            update_indexing_progress(
+                db,
+                document_id,
+                stage="vector_store",
+                embeddings_completed=min(start + len(batch), total),
+            )
+
         ids = [str(uuid.uuid4()) for _ in batch]
         metadatas = [
             {
@@ -85,12 +121,30 @@ def store_chunks(
             }
             for index, _ in enumerate(batch)
         ]
+
+        if telemetry:
+            telemetry.log(
+                "VECTOR_DB_INSERT_START",
+                batch=batch_num,
+                batch_total=batch_total,
+                vector_count=len(batch),
+            )
+
         collection.add(
             documents=batch,
             embeddings=embeddings,
             ids=ids,
             metadatas=metadatas,
         )
+
+        if telemetry:
+            telemetry.log(
+                "VECTOR_DB_INSERT_COMPLETE",
+                batch=batch_num,
+                batch_total=batch_total,
+                vector_count=len(batch),
+            )
+
         del embeddings, batch, ids, metadatas
         gc.collect()
 
@@ -103,8 +157,17 @@ def process_document(
     collection_id: int | None = None,
     session_id: int | None = None,
     document_id: int | None = None,
+    db: Session | None = None,
+    telemetry: IngestionContext | None = None,
 ):
-    text = load_document(file_path)
+    if telemetry:
+        with telemetry.stage("loading", slow_after_seconds=30):
+            text = load_document(file_path)
+            char_count = len(text)
+            telemetry.log("DOCUMENT_LOADING_COMPLETE", characters=char_count)
+    else:
+        text = load_document(file_path)
+
     injection_matches = detect_prompt_injection(text)
     if injection_matches:
         logger.warning(
@@ -114,6 +177,7 @@ def process_document(
             document_id,
             injection_matches[:5],
         )
+
     settings = get_settings()
     if len(text) > settings.MAX_INGEST_TEXT_CHARS:
         logger.warning(
@@ -123,19 +187,44 @@ def process_document(
         )
         text = text[: settings.MAX_INGEST_TEXT_CHARS]
 
-    chunks = chunk_text(text)
+    if db is not None and document_id is not None:
+        update_indexing_progress(db, document_id, stage="chunking")
+
+    if telemetry:
+        with telemetry.stage("chunking", slow_after_seconds=30):
+            chunks = chunk_text(text)
+            telemetry.log("CHUNKING_COMPLETE", chunk_count=len(chunks))
+    else:
+        chunks = chunk_text(text)
+
     del text
     if not chunks:
         raise ValueError("No indexable text chunks were produced from the document.")
 
-    store_chunks(
-        chunks,
-        filename=filename,
-        user_id=user_id,
-        workspace_id=workspace_id,
-        collection_id=collection_id,
-        session_id=session_id,
-        document_id=document_id,
-    )
+    if telemetry:
+        with telemetry.stage("embedding", slow_after_seconds=60):
+            store_chunks(
+                chunks,
+                filename=filename,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                collection_id=collection_id,
+                session_id=session_id,
+                document_id=document_id,
+                db=db,
+                telemetry=telemetry,
+            )
+    else:
+        store_chunks(
+            chunks,
+            filename=filename,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            collection_id=collection_id,
+            session_id=session_id,
+            document_id=document_id,
+            db=db,
+            telemetry=telemetry,
+        )
 
     return len(chunks)
