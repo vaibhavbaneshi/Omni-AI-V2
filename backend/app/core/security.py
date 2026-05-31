@@ -1,3 +1,5 @@
+import logging
+
 from jose import jwt
 from jose import JWTError
 
@@ -13,6 +15,8 @@ from app.services.auth_service import (
 )
 from app.db.session import get_db
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="login"
@@ -40,7 +44,8 @@ def get_current_username(
 
         return username
 
-    except JWTError:
+    except JWTError as exc:
+        logger.info("Authentication token rejected: %s", exc)
         raise credentials_exception
 
 
@@ -54,6 +59,7 @@ def get_current_token_payload(
     try:
         return decode_access_token(token)
     except JWTError as exc:
+        logger.info("Authentication token payload rejected: %s", exc)
         raise credentials_exception from exc
 
 
@@ -70,6 +76,7 @@ def get_current_user(
     )
 
     if not user:
+        logger.info("Authentication token subject not found: username=%s", username)
         raise HTTPException(
             status_code=401,
             detail="Could not validate credentials"

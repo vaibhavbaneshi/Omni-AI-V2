@@ -5,7 +5,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
-import { useAuthRedirect } from "@/lib/auth";
+import { consumeAuthExpiredMessage, useAuthRedirect } from "@/lib/auth";
 import { sanitizeAuthError } from "@/lib/user-facing-errors";
 import { fadeUpVariant } from "@/lib/motion";
 
@@ -14,10 +14,12 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const expiredMessage = consumeAuthExpiredMessage();
     const oauthError = new URLSearchParams(window.location.search).get("error");
-    if (oauthError) {
+    const nextError = expiredMessage || oauthError;
+    if (nextError) {
       const id = window.setTimeout(() => {
-        setError(sanitizeAuthError(oauthError));
+        setError(sanitizeAuthError(nextError));
       }, 0);
 
       return () => window.clearTimeout(id);

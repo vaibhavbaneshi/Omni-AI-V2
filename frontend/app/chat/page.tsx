@@ -479,18 +479,14 @@ export default function ChatPage() {
       setActiveChat(completedChat);
       setChats((prev) => prev.map((c) => (c.id === completedChat.id ? completedChat : c)));
     } catch (error) {
-      const isAuthFailure = error instanceof ApiError && error.status === 401;
+      const isAuthFailure =
+        error instanceof ApiError && (error.status === 401 || error.status === 403);
       const message = sanitizeChatError(
         error instanceof ApiError ? error.message : undefined,
         error instanceof ApiError ? { status: error.status } : undefined
       );
 
-      if (isAuthFailure) {
-        clearSession();
-        window.location.assign(
-          `/login?error=${encodeURIComponent("Your session expired. Please sign in again.")}`
-        );
-      }
+      if (isAuthFailure) return;
 
       setStreamError(message);
 

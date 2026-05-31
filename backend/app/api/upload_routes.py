@@ -1,4 +1,6 @@
 import os
+import logging
+import tempfile
 import time
 
 from fastapi import (
@@ -27,8 +29,7 @@ from app.models.user import User
 from sqlalchemy.orm import Session
 
 router = APIRouter()
-
-UPLOAD_DIR = "uploads"
+logger = logging.getLogger(__name__)
 
 @router.post("/upload")
 
@@ -41,7 +42,35 @@ async def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    await validate_document_upload(file, max_bytes=get_settings().MAX_UPLOAD_BYTES)
+    settings = get_settings()
+    logger.info(
+        "Upload request received filename=%s content_type=%s user_id=%s session_id=%s collection_id=%s",
+        file.filename,
+        file.content_type,
+        current_user.id,
+        session_id,
+        collection_id,
+    )
+
+    try:
+        file_size = await validate_document_upload(file, max_bytes=settings.MAX_UPLOAD_BYTES)
+    except HTTPException:
+        logger.warning(
+            "Upload validation failed filename=%s user_id=%s session_id=%s",
+            file.filename,
+            current_user.id,
+            session_id,
+            exc_info=True,
+        )
+        raise
+
+    logger.info(
+        "Upload validation passed filename=%s size=%s user_id=%s session_id=%s",
+        file.filename,
+        file_size,
+        current_user.id,
+        session_id,
+    )
 
     if session_id is None:
         raise HTTPException(
@@ -101,14 +130,10 @@ async def upload_document(
             db.commit()
             db.refresh(collection_record)
 
-    user_upload_dir = os.path.join(
-        UPLOAD_DIR,
-        str(current_user.id),
-        workspace_id,
-        str(session_id),
+    user_upload_dir = tempfile.mkdtemp(
+        prefix=f"omniai-upload-u{current_user.id}-s{session_id}-",
+        dir=tempfile.gettempdir(),
     )
-
-    os.makedirs(user_upload_dir, exist_ok=True)
 
     safe_name = os.path.basename(file.filename)
     file_path = os.path.join(
@@ -116,11 +141,31 @@ async def upload_document(
         safe_name
     )
 
-    with open(file_path, "wb") as f:
-
-        content = await file.read()
-
-        f.write(content)
+    try:
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        logger.info(
+            "Upload stored in temporary file filename=%s size=%s path=%s user_id=%s session_id=%s",
+            safe_name,
+            len(content),
+            file_path,
+            current_user.id,
+            session_id,
+        )
+    except Exception as exc:
+        try:
+            os.rmdir(user_upload_dir)
+        except OSError:
+            pass
+        logger.exception(
+            "Upload storage failed filename=%s path=%s user_id=%s session_id=%s",
+            safe_name,
+            file_path,
+            current_user.id,
+            session_id,
+        )
+        raise HTTPException(status_code=500, detail="Unable to store uploaded file.") from exc
 
     document = DocumentRecord(
         user_id=current_user.id,
@@ -129,15 +174,23 @@ async def upload_document(
         session_id=session_id,
         filename=safe_name,
         storage_path=file_path,
+        file_size=file_size,
         chunks_created=0,
     )
     db.add(document)
     db.commit()
     db.refresh(document)
 
-    settings = get_settings()
     if settings.INGEST_IN_BACKGROUND:
         background_tasks.add_task(ingest_document_record, document.id)
+        logger.info(
+            "Upload queued for background indexing document_id=%s filename=%s size=%s user_id=%s session_id=%s",
+            document.id,
+            safe_name,
+            file_size,
+            current_user.id,
+            session_id,
+        )
         return {
             "message": "Document uploaded. Indexing in background.",
             "filename": safe_name,
@@ -186,15 +239,52 @@ async def upload_document(
         )
         db.delete(document)
         db.commit()
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        logger.warning(
+            "Document processing failed filename=%s document_id=%s user_id=%s session_id=%s error=%s",
+            safe_name,
+            document.id,
+            current_user.id,
+            session_id,
+            str(e),
+            exc_info=True,
+        )
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         db.delete(document)
         db.commit()
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        logger.exception(
+            "Unexpected document processing failure filename=%s document_id=%s user_id=%s session_id=%s",
+            safe_name,
+            document.id,
+            current_user.id,
+            session_id,
+        )
 
         raise HTTPException(
-            status_code=400,
-            detail=str(e)
-        )
+            status_code=500,
+            detail="Document upload failed during processing. Check backend logs for details."
+        ) from e
+
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        try:
+            os.rmdir(user_upload_dir)
+        except OSError:
+            pass
+
+    logger.info(
+        "Upload processed successfully document_id=%s filename=%s size=%s chunks=%s user_id=%s session_id=%s",
+        document.id,
+        safe_name,
+        file_size,
+        chunk_count,
+        current_user.id,
+        session_id,
+    )
 
     return {
         "message": "Document uploaded successfully",
@@ -236,7 +326,12 @@ def list_documents(
             {
                 "id": document.id,
                 "filename": document.filename,
-                "size": os.path.getsize(document.storage_path) if os.path.exists(document.storage_path) else 0,
+                "size": document.file_size
+                or (
+                    os.path.getsize(document.storage_path)
+                    if document.storage_path and os.path.exists(document.storage_path)
+                    else 0
+                ),
                 "updated_at": document.created_at.timestamp() if document.created_at else 0,
                 "collection_id": document.collection_id,
                 "session_id": document.session_id,

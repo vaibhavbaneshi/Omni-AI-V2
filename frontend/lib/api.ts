@@ -1,4 +1,5 @@
 import { sanitizeChatError } from "@/lib/user-facing-errors";
+import { AUTH_EXPIRED_MESSAGE, handleAuthExpiration } from "@/lib/auth";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
@@ -58,9 +59,13 @@ export async function apiRequest<T>(
       (typeof body?.error === "string" && body.error) ||
       (typeof body?.message === "string" && body.message) ||
       `Request failed (${response.status} ${response.statusText})`;
+    if (response.status === 401 || response.status === 403) {
+      handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
+    }
+
     const message =
-      response.status === 401
-        ? "Authentication failed. Please sign in again."
+      response.status === 401 || response.status === 403
+        ? AUTH_EXPIRED_MESSAGE
         : detail;
     throw new ApiError(message, response.status, response.statusText);
   }
@@ -472,10 +477,14 @@ export async function streamChat({
       }
     }
 
+    if (response.status === 401 || response.status === 403) {
+      handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
+    }
+
     throw new ApiError(
       sanitizeChatError(
-        response.status === 401
-          ? "Authentication failed. Please sign in again."
+        response.status === 401 || response.status === 403
+          ? AUTH_EXPIRED_MESSAGE
           : detail,
         { status: response.status }
       ),

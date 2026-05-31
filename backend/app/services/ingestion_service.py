@@ -32,6 +32,16 @@ def ingest_document_record(document_id: int) -> None:
         if not document.storage_path or not os.path.exists(document.storage_path):
             raise FileNotFoundError("Uploaded file is no longer available on disk.")
 
+        logger.info(
+            "Starting document ingestion document_id=%s filename=%s size=%s path=%s user_id=%s session_id=%s",
+            document.id,
+            document.filename,
+            document.file_size,
+            document.storage_path,
+            document.user_id,
+            document.session_id,
+        )
+
         chunk_count = process_document(
             file_path=document.storage_path,
             filename=document.filename,
@@ -75,9 +85,33 @@ def ingest_document_record(document_id: int) -> None:
             try:
                 if os.path.exists(document.storage_path):
                     os.remove(document.storage_path)
+                    parent = os.path.dirname(document.storage_path)
+                    try:
+                        os.rmdir(parent)
+                    except OSError:
+                        pass
                 db.delete(document)
                 db.commit()
             except Exception:
                 db.rollback()
     finally:
+        if document and document.storage_path and os.path.exists(document.storage_path):
+            try:
+                os.remove(document.storage_path)
+                parent = os.path.dirname(document.storage_path)
+                try:
+                    os.rmdir(parent)
+                except OSError:
+                    pass
+                logger.info(
+                    "Cleaned temporary upload file document_id=%s path=%s",
+                    document.id,
+                    document.storage_path,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to clean temporary upload file document_id=%s path=%s",
+                    document.id,
+                    document.storage_path,
+                )
         db.close()

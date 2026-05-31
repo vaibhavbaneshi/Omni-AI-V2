@@ -1,5 +1,4 @@
 import { useRef, useState } from "react";
-import { clearSession } from "@/lib/auth";
 import { sanitizeChatError } from "@/lib/user-facing-errors";
 import {
   ApiError,
@@ -145,10 +144,6 @@ export function useChatStream() {
               error instanceof Error ? error.message : undefined,
               error instanceof ApiError ? { status: error.status } : undefined
             );
-
-      if (error instanceof ApiError && error.status === 401) {
-        clearSession();
-      }
 
       setStreamError(message);
       throw error;

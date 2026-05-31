@@ -94,6 +94,12 @@ class DocumentRecord(Base):
         nullable=False
     )
 
+    file_size = Column(
+        Integer,
+        nullable=False,
+        default=0
+    )
+
     chunks_created = Column(
         Integer,
         default=0

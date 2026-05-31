@@ -17,7 +17,7 @@ ZIP_MAGIC = b"PK\x03\x04"
 XLS_MAGIC = b"\xD0\xCF\x11\xE0"
 
 
-async def validate_document_upload(file: UploadFile, *, max_bytes: int) -> None:
+async def validate_document_upload(file: UploadFile, *, max_bytes: int) -> int:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
@@ -54,6 +54,8 @@ async def validate_document_upload(file: UploadFile, *, max_bytes: int) -> None:
         )
     if not body.strip():
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    return len(body)
 
 
 # Backward-compatible alias

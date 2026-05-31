@@ -68,8 +68,8 @@ export function sanitizeChatError(
   raw: string | null | undefined,
   options?: { status?: number }
 ): string {
-  if (options?.status === 401) {
-    return "Your session expired. Please sign in again.";
+  if (options?.status === 401 || options?.status === 403) {
+    return "Your session has expired. Please sign in again.";
   }
 
   if (options?.status === 429) {
@@ -120,8 +120,8 @@ export function sanitizeApiError(
 ): string {
   const fallback = options?.fallback || "Something went wrong. Please try again.";
 
-  if (options?.status === 401) {
-    return "Your session expired. Please sign in again.";
+  if (options?.status === 401 || options?.status === 403) {
+    return "Your session has expired. Please sign in again.";
   }
 
   if (!raw?.trim()) {
