@@ -1,5 +1,10 @@
 import { sanitizeChatError } from "@/lib/user-facing-errors";
-import { AUTH_EXPIRED_MESSAGE, handleAuthExpiration } from "@/lib/auth";
+import {
+  AUTH_EXPIRED_MESSAGE,
+  getSession,
+  handleAuthExpiration,
+  persistSession,
+} from "@/lib/auth";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
@@ -16,6 +21,41 @@ export class ApiError extends Error {
   }
 }
 
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken() {
+  const session = getSession();
+  if (!session?.refreshToken) return null;
+
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refreshToken }),
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const body = (await response.json()) as {
+          access_token?: string;
+          refresh_token?: string;
+        };
+        if (!body.access_token || !body.refresh_token) return null;
+        persistSession({
+          ...session,
+          token: body.access_token,
+          refreshToken: body.refresh_token,
+        });
+        return body.access_token;
+      })
+      .catch(() => null)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  return refreshPromise;
+}
+
 async function parseResponseBody(response: Response) {
   const text = await response.text();
   if (!text) return null;
@@ -30,7 +70,8 @@ async function parseResponseBody(response: Response) {
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
-  token?: string | null
+  token?: string | null,
+  retryAuth = true
 ): Promise<T> {
   const headers = new Headers(options.headers);
 
@@ -60,6 +101,12 @@ export async function apiRequest<T>(
       (typeof body?.message === "string" && body.message) ||
       `Request failed (${response.status} ${response.statusText})`;
     if (response.status === 401 || response.status === 403) {
+      if (retryAuth && response.status === 401 && !path.startsWith("/auth/")) {
+        const refreshedToken = await refreshAccessToken();
+        if (refreshedToken) {
+          return apiRequest<T>(path, options, refreshedToken, false);
+        }
+      }
       handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
     }
 
@@ -79,8 +126,21 @@ export async function apiRequest<T>(
 
 export type AuthTokenResponse = {
   access_token: string;
+  refresh_token?: string;
   token_type: string;
 };
+
+export async function logoutSession(refreshToken?: string | null) {
+  return apiRequest<{ message: string }>(
+    "/auth/logout",
+    {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: refreshToken || null }),
+    },
+    null,
+    false
+  );
+}
 
 export type UploadDocumentResponse = {
   message: string;
@@ -411,6 +471,7 @@ export async function streamChat({
   token,
   signal,
   onEvent,
+  retryAuth = true,
 }: {
   query: string;
   sessionId: number;
@@ -420,6 +481,7 @@ export async function streamChat({
   token?: string | null;
   signal?: AbortSignal;
   onEvent: (event: ChatStreamEvent) => void;
+  retryAuth?: boolean;
 }) {
   const params = new URLSearchParams({
     query,
@@ -478,6 +540,22 @@ export async function streamChat({
     }
 
     if (response.status === 401 || response.status === 403) {
+      if (retryAuth && response.status === 401) {
+        const refreshedToken = await refreshAccessToken();
+        if (refreshedToken) {
+          return streamChat({
+            query,
+            sessionId,
+            mode,
+            model,
+            collectionId,
+            token: refreshedToken,
+            signal,
+            onEvent,
+            retryAuth: false,
+          });
+        }
+      }
       handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
     }
 

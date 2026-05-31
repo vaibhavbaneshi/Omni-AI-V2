@@ -4,17 +4,18 @@ from pathlib import Path
 import pytest
 
 from app.core.supported_uploads import ALLOWED_EXTENSIONS, SUPPORTED_UPLOADS_LABEL
-from app.core.upload_validation import PDF_MAGIC, validate_document_upload
+from app.core.upload_validation import PDF_MAGIC, sanitize_upload_filename, validate_document_upload
 from app.services.document_loaders import DocumentLoadError, load_document
 
 
 def test_supported_extensions_include_common_formats():
-    assert {".pdf", ".txt", ".docx", ".csv", ".xlsx", ".xls"}.issubset(ALLOWED_EXTENSIONS)
+    assert {".pdf", ".txt", ".md", ".markdown", ".docx"}.issubset(ALLOWED_EXTENSIONS)
+    assert ".csv" not in ALLOWED_EXTENSIONS
 
 
 def test_supported_uploads_label():
     assert "PDF" in SUPPORTED_UPLOADS_LABEL
-    assert "CSV" in SUPPORTED_UPLOADS_LABEL
+    assert "Markdown" in SUPPORTED_UPLOADS_LABEL
 
 
 def test_pdf_magic_constant():
@@ -27,12 +28,12 @@ def test_load_txt(tmp_path: Path):
     assert load_document(str(file_path)) == "Hello from a text file."
 
 
-def test_load_csv(tmp_path: Path):
-    file_path = tmp_path / "data.csv"
-    file_path.write_text("name,score\nAlice,10\nBob,20\n", encoding="utf-8")
+def test_load_markdown(tmp_path: Path):
+    file_path = tmp_path / "notes.md"
+    file_path.write_text("# Heading\n\nHello from markdown.", encoding="utf-8")
     text = load_document(str(file_path))
-    assert "Alice" in text
-    assert "Bob" in text
+    assert "Heading" in text
+    assert "markdown" in text
 
 
 def test_load_empty_txt_raises(tmp_path: Path):
@@ -68,6 +69,19 @@ async def test_validate_document_upload_rejects_unknown_extension():
     with pytest.raises(Exception) as exc:
         await validate_document_upload(upload, max_bytes=1024)
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_validate_document_upload_rejects_zip():
+    upload = _FakeUpload("archive.zip", b"PK\x03\x04", content_type="application/zip")
+    with pytest.raises(Exception) as exc:
+        await validate_document_upload(upload, max_bytes=1024)
+    assert exc.value.status_code == 400
+
+
+def test_sanitize_upload_filename_blocks_path_traversal():
+    assert sanitize_upload_filename("../../evil.txt") == "evil.txt"
+    assert sanitize_upload_filename("résumé?.txt") == "r_sum_.txt"
 
 
 @pytest.mark.asyncio

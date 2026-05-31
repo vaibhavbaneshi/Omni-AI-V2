@@ -49,6 +49,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { Separator } from "@/components/ui/separator";
 import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
 import { formatCount, useAnalytics } from "@/hooks/useAnalytics";
+import { logoutSession } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const quickActions = [
@@ -172,7 +173,8 @@ export default function DashboardPage() {
   const displayName = session?.name?.split(" ")[0] || "John";
   const initials = getInitials(session?.name);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await logoutSession(session?.refreshToken).catch(() => undefined);
     clearSession();
     router.replace("/");
   };

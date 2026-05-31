@@ -8,6 +8,7 @@ export type OmniSession = {
   email: string;
   username: string;
   token: string;
+  refreshToken?: string;
   createdAt: string;
 };
 
@@ -36,6 +37,7 @@ export function getSession(): OmniSession | null {
       email: parsed.email,
       username: parsed.username || parsed.email,
       token: parsed.token,
+      refreshToken: parsed.refreshToken,
       createdAt: parsed.createdAt || new Date().toISOString(),
     };
   } catch {
@@ -61,17 +63,20 @@ export function createSession({
   email,
   username,
   token,
+  refreshToken,
 }: {
   name?: string;
   email: string;
   username?: string;
   token: string;
+  refreshToken?: string | null;
 }) {
   const session: OmniSession = {
     name: name?.trim() || email.split("@")[0] || "User",
     email,
     username: username || email,
     token,
+    refreshToken: refreshToken || undefined,
     createdAt: new Date().toISOString(),
   };
 

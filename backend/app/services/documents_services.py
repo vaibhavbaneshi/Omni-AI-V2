@@ -7,6 +7,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from app.core.app_settings import get_settings
 from app.core.chroma_client import get_or_create_collection
+from app.core.sanitize import detect_prompt_injection
 from app.services.document_loaders import load_document
 from app.services.embedding_service import encode_texts
 
@@ -104,6 +105,15 @@ def process_document(
     document_id: int | None = None,
 ):
     text = load_document(file_path)
+    injection_matches = detect_prompt_injection(text)
+    if injection_matches:
+        logger.warning(
+            "Prompt injection patterns detected in uploaded document filename=%s user_id=%s document_id=%s matches=%s",
+            filename,
+            user_id,
+            document_id,
+            injection_matches[:5],
+        )
     settings = get_settings()
     if len(text) > settings.MAX_INGEST_TEXT_CHARS:
         logger.warning(

@@ -39,7 +39,7 @@ class AppSettings(BaseSettings):
         validation_alias="JWT_SECRET_KEY",
     )
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 60
+    JWT_EXPIRE_MINUTES: int = 15
 
     LLM_PROVIDER: LLMProviderName = "groq"
     GROQ_API_KEY: str = ""
@@ -93,7 +93,7 @@ class AppSettings(BaseSettings):
 
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001"
 
-    MAX_UPLOAD_BYTES: int = 15 * 1024 * 1024
+    MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024
     RATE_LIMIT_PER_MINUTE: int = 120
     MAX_QUERY_CHARS: int = 12_000
 
@@ -190,6 +190,8 @@ class AppSettings(BaseSettings):
                 )
             if len(self.JWT_SECRET_KEY) < 32:
                 raise RuntimeError("JWT_SECRET_KEY should be at least 32 characters in production.")
+            if "*" in self.cors_origin_list:
+                raise RuntimeError("CORS_ORIGINS must not include '*' in production.")
             if self.LLM_PROVIDER == "groq" and not self.GROQ_API_KEY.strip():
                 raise RuntimeError("GROQ_API_KEY must be set when LLM_PROVIDER=groq in production.")
             if self.LLM_PROVIDER == "openai" and not self.OPENAI_API_KEY.strip():

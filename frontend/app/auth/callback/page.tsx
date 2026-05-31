@@ -14,6 +14,7 @@ function AuthCallbackContent() {
   useEffect(() => {
     const error = searchParams.get("error");
     const token = searchParams.get("token");
+    const refreshToken = searchParams.get("refresh_token");
     const email = searchParams.get("email");
     const name = searchParams.get("name");
     const username = searchParams.get("username");
@@ -51,6 +52,7 @@ function AuthCallbackContent() {
       name: name || email.split("@")[0],
       username: username || email,
       token,
+      refreshToken,
     });
 
     router.replace(next.startsWith("/") ? next : "/dashboard");

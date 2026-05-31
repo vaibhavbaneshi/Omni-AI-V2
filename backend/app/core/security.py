@@ -15,6 +15,7 @@ from app.services.auth_service import (
 )
 from app.db.session import get_db
 from app.models.user import User
+from app.models.user_settings import UserSessionRecord
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +85,27 @@ def get_current_user(
 
     from app.services.settings_service import touch_user_session
 
+    session_jti = token_payload.get("jti")
+    if session_jti:
+        session_record = (
+            db.query(UserSessionRecord)
+            .filter(
+                UserSessionRecord.user_id == user.id,
+                UserSessionRecord.session_jti == session_jti,
+            )
+            .first()
+        )
+        if session_record and session_record.revoked_at is not None:
+            logger.info("Authentication token belongs to revoked session user_id=%s", user.id)
+            raise HTTPException(
+                status_code=401,
+                detail="Could not validate credentials",
+            )
+
     touch_user_session(
         db,
         user_id=user.id,
-        session_jti=token_payload.get("jti"),
+        session_jti=session_jti,
     )
 
     return user

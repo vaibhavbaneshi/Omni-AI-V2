@@ -36,12 +36,15 @@ class UserSessionRecord(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     session_jti = Column(String, unique=True, nullable=False, index=True)
+    refresh_token_hash = Column(String, nullable=True, index=True)
+    refresh_expires_at = Column(DateTime, nullable=True)
     device_label = Column(String, nullable=False, server_default="Unknown device")
     ip_address = Column(String, nullable=True)
     user_agent = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_active_at = Column(DateTime, default=datetime.utcnow)
     revoked_at = Column(DateTime, nullable=True)
+    user = relationship("User")
 
 
 class UserApiKey(Base):
@@ -93,3 +96,14 @@ class BillingInvoice(Base):
     invoice_date = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", backref="billing_invoices")
+
+
+class SecurityAuditLog(Base):
+    __tablename__ = "security_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    ip_address = Column(String, nullable=True)
+    action = Column(String, nullable=False, index=True)
+    detail = Column(Text, nullable=False, server_default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -103,6 +103,14 @@ class SecurityHeadersMiddleware:
                         (b"x-content-type-options", b"nosniff"),
                         (b"x-frame-options", b"DENY"),
                         (b"referrer-policy", b"strict-origin-when-cross-origin"),
+                        (
+                            b"permissions-policy",
+                            b"camera=(), microphone=(), geolocation=(), payment=()",
+                        ),
+                        (
+                            b"content-security-policy",
+                            b"default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+                        ),
                     ]
                 )
                 if settings.ENVIRONMENT == "production":
@@ -123,8 +131,17 @@ class InMemoryRateLimitMiddleware:
 
     def __init__(self, app: ASGIApp, requests_per_minute: int = 120):
         self.app = app
-        self.limit = max(requests_per_minute, 1)
+        self.default_limit = max(min(requests_per_minute, 100), 1)
         self._hits: dict[str, deque[float]] = defaultdict(deque)
+
+    def _rule_for_path(self, path: str) -> tuple[int, int, str]:
+        if path.startswith("/upload"):
+            return 10, 3600, "uploads"
+        if path.startswith("/chat"):
+            return 30, 60, "chat"
+        if path.startswith("/auth/"):
+            return 10, 60, "auth"
+        return self.default_limit, 60, "api"
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -136,22 +153,52 @@ class InMemoryRateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        forwarded_for = None
+        for name, value in scope.get("headers", []):
+            if name.lower() == b"x-forwarded-for":
+                forwarded_for = value.decode("latin-1").split(",")[0].strip()
+                break
         client = scope.get("client")
-        client_ip = client[0] if client else "unknown"
+        client_ip = forwarded_for or (client[0] if client else "unknown")
         now = time.time()
-        window_start = now - 60
-        bucket = self._hits[client_ip]
+        limit, window_seconds, scope_name = self._rule_for_path(path)
+        window_start = now - window_seconds
+        bucket_key = f"{client_ip}:{scope_name}"
+        bucket = self._hits[bucket_key]
 
         while bucket and bucket[0] < window_start:
             bucket.popleft()
 
-        if len(bucket) >= self.limit:
+        reset_seconds = int(max(1, (bucket[0] + window_seconds - now) if bucket else window_seconds))
+
+        if len(bucket) >= limit:
             response = JSONResponse(
                 content={"detail": "Rate limit exceeded"},
                 status_code=429,
+                headers={
+                    "Retry-After": str(reset_seconds),
+                    "X-RateLimit-Limit": str(limit),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(reset_seconds),
+                },
             )
             await response(scope, receive, send)
             return
 
         bucket.append(now)
-        await self.app(scope, receive, send)
+
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                remaining = max(0, limit - len(bucket))
+                headers.extend(
+                    [
+                        (b"x-ratelimit-limit", str(limit).encode("latin-1")),
+                        (b"x-ratelimit-remaining", str(remaining).encode("latin-1")),
+                        (b"x-ratelimit-reset", str(reset_seconds).encode("latin-1")),
+                    ]
+                )
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)

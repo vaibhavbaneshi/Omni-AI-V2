@@ -11,6 +11,19 @@ class ProfileUpdateRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     bio: str = Field(default="", max_length=4000)
 
+    @field_validator("email")
+    @classmethod
+    def valid_email(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        if "@" not in cleaned or cleaned.startswith("@") or cleaned.endswith("@"):
+            raise ValueError("Invalid email address.")
+        return cleaned
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return value.strip()
+
 
 class PasswordChangeRequest(BaseModel):
     current_password: str | None = Field(default=None, max_length=256)
@@ -27,14 +40,14 @@ class PasswordChangeRequest(BaseModel):
 
 
 class PreferencesUpdateRequest(BaseModel):
-    default_model: str = "auto"
-    response_style: str = "balanced"
-    system_prompt: str = ""
+    default_model: str = Field(default="auto", max_length=80)
+    response_style: str = Field(default="balanced", pattern="^(concise|balanced|detailed)$")
+    system_prompt: str = Field(default="", max_length=4000)
     web_search_enabled: bool = True
     code_execution_enabled: bool = False
     streaming_enabled: bool = True
-    theme: str = "dark"
-    font_size: str = "medium"
+    theme: str = Field(default="dark", pattern="^(dark|light|system)$")
+    font_size: str = Field(default="medium", pattern="^(small|medium|large)$")
     compact_mode: bool = False
     email_notifications: bool = True
     product_updates: bool = True
@@ -51,9 +64,24 @@ class TwoFactorDisableRequest(BaseModel):
 
 
 class WebhookUpdateRequest(BaseModel):
-    url: str = ""
+    url: str = Field(default="", max_length=500)
     events: list[str] = Field(default_factory=list)
     enabled: bool = False
+
+    @field_validator("url")
+    @classmethod
+    def valid_webhook_url(cls, value: str) -> str:
+        cleaned = value.strip()
+        if cleaned and not cleaned.startswith(("https://", "http://localhost", "http://127.0.0.1")):
+            raise ValueError("Webhook URL must use HTTPS.")
+        return cleaned
+
+    @field_validator("events")
+    @classmethod
+    def limit_events(cls, value: list[str]) -> list[str]:
+        if len(value) > 20:
+            raise ValueError("Too many webhook events.")
+        return [item[:80] for item in value]
 
 
 class BillingPlanRequest(BaseModel):

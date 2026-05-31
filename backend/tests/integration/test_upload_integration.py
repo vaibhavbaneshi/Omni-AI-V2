@@ -63,6 +63,21 @@ def test_upload_docx_document(mock_process, auth_client, db_session):
     mock_process.assert_called_once()
 
 
+@patch("app.api.upload_routes.process_document", return_value=2)
+def test_upload_markdown_document(mock_process, auth_client, db_session):
+    session = ChatSessionFactory(user=auth_client.auth_user, title="Markdown Upload")
+
+    response = auth_client.post(
+        f"/upload?session_id={session.id}",
+        headers=auth_client.auth_headers,
+        files={"file": ("notes.md", BytesIO(b"# Notes\nSafe markdown."), "text/markdown")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["filename"] == "notes.md"
+    mock_process.assert_called_once()
+
+
 def test_upload_rejects_unknown_extension(auth_client, db_session):
     session = ChatSessionFactory(user=auth_client.auth_user, title="Bad Upload")
 
@@ -74,9 +89,20 @@ def test_upload_rejects_unknown_extension(auth_client, db_session):
     assert response.status_code == 400
 
 
+def test_upload_rejects_executable_extension(auth_client, db_session):
+    session = ChatSessionFactory(user=auth_client.auth_user, title="Bad Upload")
+
+    response = auth_client.post(
+        f"/upload?session_id={session.id}",
+        headers=auth_client.auth_headers,
+        files={"file": ("run.sh", BytesIO(b"#!/bin/sh\necho bad"), "text/plain")},
+    )
+    assert response.status_code == 400
+
+
 def test_upload_rejects_large_file(auth_client, db_session):
     session = ChatSessionFactory(user=auth_client.auth_user, title="Large Upload")
-    large_body = b"x" * (15 * 1024 * 1024 + 1)
+    large_body = b"x" * (20 * 1024 * 1024 + 1)
 
     response = auth_client.post(
         f"/upload?session_id={session.id}",
@@ -163,10 +189,10 @@ def test_delete_document_by_id(mock_process, auth_client, db_session):
 def test_multiple_uploads(mock_process, auth_client, db_session):
     session = ChatSessionFactory(user=auth_client.auth_user, title="Many Uploads")
 
-    for filename in ("one.txt", "two.txt"):
+    for index, filename in enumerate(("one.txt", "two.txt"), start=1):
         response = auth_client.post(
             f"/upload?session_id={session.id}",
-            headers=auth_client.auth_headers,
+            headers={**auth_client.auth_headers, "X-Forwarded-For": f"203.0.113.{index}"},
             files={"file": (filename, BytesIO(f"Content for {filename}".encode()), "text/plain")},
         )
         assert response.status_code == 200

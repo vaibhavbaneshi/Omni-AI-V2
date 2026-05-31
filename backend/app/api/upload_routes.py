@@ -19,10 +19,12 @@ from app.core.security import (
     get_current_user
 )
 from app.core.app_settings import get_settings
-from app.core.upload_validation import validate_document_upload
+from app.core.upload_validation import sanitize_upload_filename, validate_document_upload
 from app.core.telemetry import traced_span
 from app.services.ingestion_service import ingest_document_record
 from app.services.usage_tracking_service import record_ingestion_event
+from app.services.file_scanner import FileScanError, scan_uploaded_file
+from app.services.security_audit_service import audit_log
 from app.db.session import get_db
 from app.models.document import DocumentCollection, DocumentRecord
 from app.models.user import User
@@ -135,7 +137,7 @@ async def upload_document(
         dir=tempfile.gettempdir(),
     )
 
-    safe_name = os.path.basename(file.filename)
+    safe_name = sanitize_upload_filename(file.filename)
     file_path = os.path.join(
         user_upload_dir,
         safe_name
@@ -153,6 +155,28 @@ async def upload_document(
             current_user.id,
             session_id,
         )
+        scan_uploaded_file(file_path, filename=safe_name, user_id=current_user.id)
+    except FileScanError as exc:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        try:
+            os.rmdir(user_upload_dir)
+        except OSError:
+            pass
+        audit_log(
+            db,
+            action="upload.rejected.malware",
+            user_id=current_user.id,
+            detail={"filename": safe_name, "session_id": session_id},
+        )
+        logger.warning(
+            "Upload virus scan rejected filename=%s user_id=%s session_id=%s",
+            safe_name,
+            current_user.id,
+            session_id,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=400, detail="Uploaded file failed security scanning.") from exc
     except Exception as exc:
         try:
             os.rmdir(user_upload_dir)
@@ -166,6 +190,13 @@ async def upload_document(
             session_id,
         )
         raise HTTPException(status_code=500, detail="Unable to store uploaded file.") from exc
+
+    audit_log(
+        db,
+        action="upload.received",
+        user_id=current_user.id,
+        detail={"filename": safe_name, "size": file_size, "session_id": session_id},
+    )
 
     document = DocumentRecord(
         user_id=current_user.id,
@@ -414,6 +445,12 @@ def delete_document_by_id(
         raise HTTPException(status_code=404, detail="Document not found")
 
     filename = _delete_document_record(document, db)
+    audit_log(
+        db,
+        action="upload.deleted",
+        user_id=current_user.id,
+        detail={"filename": filename, "document_id": document_id},
+    )
 
     return {
         "message": "Document deleted",
@@ -444,6 +481,12 @@ def delete_document(
         raise HTTPException(status_code=404, detail="Document not found")
 
     deleted_name = _delete_document_record(document, db)
+    audit_log(
+        db,
+        action="upload.deleted",
+        user_id=current_user.id,
+        detail={"filename": deleted_name, "document_id": document.id},
+    )
 
     return {
         "message": "Document deleted",

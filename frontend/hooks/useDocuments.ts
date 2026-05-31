@@ -19,7 +19,7 @@ import {
 } from "@/lib/supported-uploads";
 import { sanitizeApiError } from "@/lib/user-facing-errors";
 
-const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 function belongsToSession(document: DocumentRecord, sessionId: number | null): boolean {
   if (!sessionId) return false;

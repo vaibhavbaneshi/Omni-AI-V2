@@ -61,6 +61,7 @@ import {
   deleteChatSession,
   getChatSessionMessages,
   listChatSessions,
+  logoutSession,
   updateChatSessionTitle,
   type DocumentRecord,
   type StreamMeta,
@@ -159,7 +160,7 @@ const workspaceModes = [
   },
 ] as const;
 
-const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 function readUrlChatId() {
   if (typeof window === "undefined") return null;
@@ -634,7 +635,8 @@ export default function ChatPage() {
   const initials = getInitials(session?.name);
   const displayName = session?.name || "John Doe";
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await logoutSession(session?.refreshToken).catch(() => undefined);
     clearSession();
     window.location.assign("/");
   };
@@ -1218,6 +1220,7 @@ export default function ChatPage() {
                         {/* Message Content */}
                         <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[15px] prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 prose-pre:shadow-none prose-pre:m-0 prose-code:text-primary prose-code:font-normal prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-headings:font-semibold prose-headings:tracking-tight prose-h2:text-[18px] prose-h2:mt-6 prose-h2:mb-4 prose-h3:text-[15px] prose-h3:mt-5 prose-h3:mb-2 prose-ul:my-3 prose-li:my-1 text-foreground/90">
                           <ReactMarkdown
+                            skipHtml
                             remarkPlugins={[remarkGfm]}
                             components={{
                               code({ className, children }) {

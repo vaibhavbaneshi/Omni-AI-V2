@@ -11,9 +11,12 @@ def get_chat_history(
     session_id,
     user_id=None,
     limit: int | None = None,
+    db=None,
 ):
 
-    db = SessionLocal()
+    owns_session = db is None
+    if db is None:
+        db = SessionLocal()
 
     if limit is None:
         limit = get_settings().CHAT_HISTORY_MESSAGE_LIMIT
@@ -35,7 +38,8 @@ def get_chat_history(
         .all()
     )
 
-    db.close()
+    if owns_session:
+        db.close()
 
     messages.reverse()
 

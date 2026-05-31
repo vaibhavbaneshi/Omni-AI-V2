@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Query
 from fastapi import Depends
 
 from sqlalchemy.orm import Session
@@ -26,7 +28,7 @@ router = APIRouter()
 @router.post("/sessions/create")
 
 def create_session(
-    first_message: str,
+    first_message: Annotated[str, Query(min_length=1, max_length=12_000)],
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -120,7 +122,7 @@ def get_session_messages(
 @router.patch("/sessions/{session_id}")
 def update_session(
     session_id: int,
-    title: str,
+    title: Annotated[str, Query(min_length=1, max_length=120)],
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -163,8 +165,8 @@ def delete_session(
 @router.post("/sessions/{session_id}/title/refine")
 def refine_session_title(
     session_id: int,
-    first_message: str,
-    assistant_preview: str = "",
+    first_message: Annotated[str, Query(min_length=1, max_length=12_000)],
+    assistant_preview: Annotated[str, Query(max_length=2_000)] = "",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -190,8 +192,8 @@ def refine_session_title(
 
 @router.post("/sessions")
 def create_session_with_title(
-    title: str = "New Chat",
-    first_message: str | None = None,
+    title: Annotated[str, Query(min_length=1, max_length=120)] = "New Chat",
+    first_message: Annotated[str | None, Query(max_length=12_000)] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

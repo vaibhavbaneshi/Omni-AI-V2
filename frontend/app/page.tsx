@@ -29,6 +29,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { clearSession, getInitials, useSession } from "@/lib/auth";
+import { logoutSession } from "@/lib/api";
 
 // Premium motion easing
 const premiumEasing = [0.16, 1, 0.3, 1] as const;
@@ -52,7 +53,8 @@ export default function LandingPage() {
   const initials = getInitials(session?.name);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await logoutSession(session?.refreshToken).catch(() => undefined);
     clearSession();
     router.replace("/");
   };

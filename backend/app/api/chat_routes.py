@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, Request
 import json
 
 from sqlalchemy.orm import Session
@@ -47,7 +49,7 @@ from app.services.title_service import refine_chat_title, should_refine_session_
 from app.services.attachment_service import is_document_query
 from app.core.security import get_current_user
 from app.core.app_settings import get_settings
-from app.core.sanitize import sanitize_user_query
+from app.core.sanitize import detect_prompt_injection, sanitize_user_query
 from app.core.telemetry import get_trace_id, set_trace_context
 from app.core.llm import LLMProviderError
 from app.core.safe_errors import chat_facing_message
@@ -55,13 +57,14 @@ from app.services.model_router import get_provider_for_route, resolve_model_rout
 from app.models.user import User
 from app.models.chat_session import ChatSession
 from app.models.message import Message
+from app.services.security_audit_service import audit_log
 
 router = APIRouter()
 
 @router.post("/chat")
 
 def chat(
-    query: str,
+    query: Annotated[str, Query(min_length=1, max_length=12_000)],
     session_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -120,16 +123,25 @@ STREAM_HEADERS = {
 @router.post("/chat-stream")
 async def chat_stream(
     request: Request,
-    query: str,
+    query: Annotated[str, Query(min_length=1, max_length=12_000)],
     session_id: int,
-    mode: str = "research",
-    model: str | None = None,
-    workspace_id: str = "default",
+    mode: Annotated[str, Query(min_length=1, max_length=40)] = "research",
+    model: Annotated[str | None, Query(max_length=80)] = None,
+    workspace_id: Annotated[str, Query(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")] = "default",
     collection_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     set_trace_context(trace_id=get_trace_id(), user_id=current_user.id)
+    injection_matches = detect_prompt_injection(query)
+    if injection_matches:
+        audit_log(
+            db,
+            action="prompt_injection.detected",
+            user_id=current_user.id,
+            ip_address=request.client.host if request.client else None,
+            detail={"matches": injection_matches[:5], "surface": "chat"},
+        )
     query = sanitize_user_query(query, max_length=get_settings().MAX_QUERY_CHARS)
 
     try:
@@ -192,7 +204,8 @@ async def chat_stream(
 
     history = get_chat_history(
         session_id=session_id,
-        user_id=current_user.id
+        user_id=current_user.id,
+        db=db,
     )
 
     # -----------------------------------

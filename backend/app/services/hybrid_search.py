@@ -52,6 +52,8 @@ def get_scoped_documents(
     collection_id=None,
     session_id=None,
 ):
+    if user_id is None:
+        return {"documents": [], "metadatas": []}
 
     where_filter = build_filter(
         user_id=user_id,
@@ -69,12 +71,7 @@ def get_scoped_documents(
             ]
         )
 
-    return collection.get(
-        include=[
-            "documents",
-            "metadatas"
-        ]
-    )
+    return {"documents": [], "metadatas": []}
 
 # -----------------------------------
 # BM25 SEARCH
@@ -139,6 +136,8 @@ def semantic_search(
     collection_id=None,
     session_id=None,
 ):
+    if user_id is None:
+        return []
 
     embedding = encode_query(query)
 
@@ -207,6 +206,8 @@ def semantic_search_with_metadata(
     collection_id=None,
     session_id=None,
 ):
+    if user_id is None:
+        return []
 
     embedding = encode_query(query)
 

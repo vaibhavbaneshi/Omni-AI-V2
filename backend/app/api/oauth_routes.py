@@ -1,16 +1,27 @@
 from urllib.parse import urlencode
 
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.oauth_config import get_oauth_settings, oauth_providers_status
 from app.core.safe_errors import user_facing_message
 from app.db.session import get_db
-from app.services.auth_service import create_access_token, decode_access_token
+from app.models.user_settings import UserSessionRecord
+from app.services.auth_service import (
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    hash_refresh_token,
+    refresh_token_expires_at,
+    verify_refresh_token,
+)
 from app.services.settings_service import register_user_session
+from app.services.security_audit_service import audit_log
 from app.services.oauth_service import (
     build_github_authorize_url,
     build_google_authorize_url,
@@ -25,6 +36,14 @@ from app.services.oauth_service import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=32, max_length=512)
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str | None = Field(default=None, max_length=512)
 
 
 def _sanitize_next_path(next_path: str | None) -> str:
@@ -47,6 +66,7 @@ def _redirect_to_frontend_error(message: str, next_path: str = "/login") -> Redi
 def _redirect_to_frontend_success(
     *,
     token: str,
+    refresh_token: str,
     email: str,
     name: str,
     username: str,
@@ -56,6 +76,7 @@ def _redirect_to_frontend_success(
     params = urlencode(
         {
             "token": token,
+            "refresh_token": refresh_token,
             "email": email,
             "name": name,
             "username": username,
@@ -68,9 +89,121 @@ def _redirect_to_frontend_success(
     )
 
 
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+def _issue_session_tokens(
+    *,
+    db: Session,
+    user,
+    request: Request,
+) -> tuple[str, str]:
+    access_token = create_access_token(data={"sub": user.username})
+    payload = decode_access_token(access_token)
+    refresh_token = create_refresh_token()
+    register_user_session(
+        db,
+        user=user,
+        session_jti=payload["jti"],
+        refresh_token_hash=hash_refresh_token(refresh_token),
+        refresh_expires_at=refresh_token_expires_at(),
+        user_agent=request.headers.get("user-agent"),
+        ip_address=_client_ip(request),
+    )
+    audit_log(
+        db,
+        action="auth.session.created",
+        user_id=user.id,
+        ip_address=_client_ip(request),
+        detail={"provider": user.oauth_provider or "local"},
+    )
+    return access_token, refresh_token
+
+
 @router.get("/providers")
 def oauth_providers():
     return oauth_providers_status()
+
+
+@router.post("/refresh")
+def refresh_session(
+    payload: RefreshRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    token_hash = hash_refresh_token(payload.refresh_token)
+    record = (
+        db.query(UserSessionRecord)
+        .filter(
+            UserSessionRecord.refresh_token_hash == token_hash,
+            UserSessionRecord.revoked_at.is_(None),
+        )
+        .first()
+    )
+
+    if not record or not record.refresh_expires_at or record.refresh_expires_at <= datetime.utcnow():
+        audit_log(
+            db,
+            action="auth.refresh.rejected",
+            user_id=record.user_id if record else None,
+            ip_address=_client_ip(request),
+            detail={"reason": "expired_or_unknown"},
+        )
+        raise HTTPException(status_code=401, detail="Refresh token is invalid or expired.")
+
+    access_token = create_access_token(data={"sub": record.user.username})
+    decoded = decode_access_token(access_token)
+    next_refresh_token = create_refresh_token()
+    record.session_jti = decoded["jti"]
+    record.refresh_token_hash = hash_refresh_token(next_refresh_token)
+    record.refresh_expires_at = refresh_token_expires_at()
+    record.last_active_at = datetime.utcnow()
+    record.ip_address = _client_ip(request)
+    record.user_agent = (request.headers.get("user-agent") or "")[:500] or None
+    db.commit()
+
+    audit_log(
+        db,
+        action="auth.refresh.rotated",
+        user_id=record.user_id,
+        ip_address=_client_ip(request),
+        detail={"session_id": record.id},
+    )
+    return {
+        "access_token": access_token,
+        "refresh_token": next_refresh_token,
+        "token_type": "bearer",
+    }
+
+
+@router.post("/logout")
+def logout_session(
+    payload: LogoutRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    record = None
+    if payload.refresh_token:
+        record = (
+            db.query(UserSessionRecord)
+            .filter(UserSessionRecord.refresh_token_hash == hash_refresh_token(payload.refresh_token))
+            .first()
+        )
+    if record and record.revoked_at is None:
+        record.revoked_at = datetime.utcnow()
+        db.commit()
+        audit_log(
+            db,
+            action="auth.logout",
+            user_id=record.user_id,
+            ip_address=_client_ip(request),
+            detail={"session_id": record.id},
+        )
+    return {"message": "Logged out"}
 
 
 @router.get("/github")
@@ -127,18 +260,11 @@ def github_callback(
         )
         profile = fetch_github_profile(access_token)
         user = get_or_create_oauth_user(db, profile, provider="github")
-        token = create_access_token(data={"sub": user.username})
-        payload = decode_access_token(token)
-        register_user_session(
-            db,
-            user=user,
-            session_jti=payload["jti"],
-            user_agent=request.headers.get("user-agent"),
-            ip_address=request.client.host if request.client else None,
-        )
+        token, refresh_token = _issue_session_tokens(db=db, user=user, request=request)
 
         return _redirect_to_frontend_success(
             token=token,
+            refresh_token=refresh_token,
             email=user.email,
             name=profile["name"],
             username=user.username,
@@ -203,18 +329,11 @@ def google_callback(
         )
         profile = fetch_google_profile(access_token)
         user = get_or_create_oauth_user(db, profile, provider="google")
-        token = create_access_token(data={"sub": user.username})
-        payload = decode_access_token(token)
-        register_user_session(
-            db,
-            user=user,
-            session_jti=payload["jti"],
-            user_agent=request.headers.get("user-agent"),
-            ip_address=request.client.host if request.client else None,
-        )
+        token, refresh_token = _issue_session_tokens(db=db, user=user, request=request)
 
         return _redirect_to_frontend_success(
             token=token,
+            refresh_token=refresh_token,
             email=user.email,
             name=profile["name"],
             username=user.username,

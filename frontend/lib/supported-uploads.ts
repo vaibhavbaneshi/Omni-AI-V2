@@ -1,22 +1,19 @@
 export const ALLOWED_UPLOAD_EXTENSIONS = [
   ".pdf",
   ".txt",
+  ".md",
+  ".markdown",
   ".docx",
-  ".csv",
-  ".xlsx",
-  ".xls",
 ] as const;
 
-export const SUPPORTED_UPLOADS_LABEL = "PDF, TXT, DOCX, CSV, XLS, XLSX";
+export const SUPPORTED_UPLOADS_LABEL = "PDF, DOCX, TXT, Markdown";
 
 export const UPLOAD_ACCEPT = [
   ...ALLOWED_UPLOAD_EXTENSIONS,
   "application/pdf",
   "text/plain",
-  "text/csv",
+  "text/markdown",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
 ].join(",");
 
 export function isSupportedUploadFilename(filename: string): boolean {

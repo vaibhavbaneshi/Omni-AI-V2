@@ -140,7 +140,7 @@ def load_document(file_path: str) -> str:
 
     if extension == ".pdf":
         return load_pdf(file_path)
-    if extension == ".txt":
+    if extension in {".txt", ".md", ".markdown"}:
         return load_txt(file_path)
     if extension == ".docx":
         return load_docx(file_path)

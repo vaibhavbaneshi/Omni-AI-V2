@@ -95,6 +95,8 @@ def register_user_session(
     *,
     user: User,
     session_jti: str,
+    refresh_token_hash: str | None = None,
+    refresh_expires_at=None,
     user_agent: str | None = None,
     ip_address: str | None = None,
 ) -> UserSessionRecord:
@@ -102,6 +104,8 @@ def register_user_session(
     record = UserSessionRecord(
         user_id=user.id,
         session_jti=session_jti,
+        refresh_token_hash=refresh_token_hash,
+        refresh_expires_at=refresh_expires_at,
         device_label=device_label_from_user_agent(user_agent),
         ip_address=ip_address,
         user_agent=(user_agent or "")[:500] or None,
