@@ -49,12 +49,23 @@ def should_use_background_tasks() -> bool:
 
 
 def on_ingestion_job_failure(job, connection, exc_type, exc_value, traceback) -> None:
-    """RQ failure hook — record DLQ entry and mark document failed."""
+    """RQ failure hook — DLQ + mark failed only after retries are exhausted."""
     document_id = job.args[0] if job.args else None
     failure_reason = str(exc_value) if exc_value else exc_type.__name__
     duration_ms = None
     if job.started_at and job.ended_at:
         duration_ms = round((job.ended_at - job.started_at).total_seconds() * 1000, 2)
+
+    retries_left = getattr(job, "retries_left", 0) or 0
+    if retries_left > 0:
+        logger.warning(
+            "[INGEST_JOB_RETRY_SCHEDULED] job_id=%s document_id=%s retries_left=%s failure_reason=%s",
+            job.id,
+            document_id,
+            retries_left,
+            failure_reason,
+        )
+        return
 
     logger.error(
         "[INGEST_JOB_EXHAUSTED] job_id=%s document_id=%s duration_ms=%s failure_reason=%s",

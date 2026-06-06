@@ -12,9 +12,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend /app/backend
 
+RUN chmod +x /app/backend/scripts/railway_web_and_worker.sh
+
 ENV PYTHONUNBUFFERED=1
 ENV ENVIRONMENT=production
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Railway injects $PORT — do not hardcode 8000 in production.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

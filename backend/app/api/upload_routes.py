@@ -1,6 +1,5 @@
 import os
 import logging
-import tempfile
 import time
 
 from fastapi import (
@@ -15,9 +14,8 @@ from fastapi import (
 from app.services.document_loaders import DocumentLoadError
 from app.services.documents_services import get_document_collection
 
-from app.core.security import (
-    get_current_user
-)
+from app.core.upload_storage import create_upload_directory
+from app.core.security import get_current_user
 from app.core.app_settings import get_settings
 from app.core.upload_validation import sanitize_upload_filename, validate_document_upload
 from app.services.indexing_progress import document_status_payload, update_indexing_progress
@@ -137,9 +135,9 @@ async def upload_document(
             db.commit()
             db.refresh(collection_record)
 
-    user_upload_dir = tempfile.mkdtemp(
-        prefix=f"omniai-upload-u{current_user.id}-s{session_id}-",
-        dir=tempfile.gettempdir(),
+    user_upload_dir = create_upload_directory(
+        user_id=current_user.id,
+        session_id=session_id,
     )
 
     safe_name = sanitize_upload_filename(file.filename)

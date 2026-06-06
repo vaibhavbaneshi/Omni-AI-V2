@@ -60,9 +60,22 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/admin/ingestion-que
 
 | Service | Command | Notes |
 |---------|---------|-------|
-| `backend` | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` | Existing API |
-| `ingest-worker` | `python -m app.worker` | **New** — same repo, different start command |
+| `backend` | See below | API + worker in one container |
 | `redis` | Railway Redis plugin | Shared broker |
+
+**Omni-AI-V2 Custom Start Command** (pick one):
+
+```bash
+sh /app/backend/scripts/railway_web_and_worker.sh
+```
+
+Or without the script file (works immediately):
+
+```bash
+cd /app/backend && python -m app.worker & exec uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Do **not** use a separate `ingest-worker` service on Railway unless you add shared object storage — use one service for API + worker.
 
 ### Environment Variables (both API + worker)
 

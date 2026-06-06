@@ -63,6 +63,8 @@ class AppSettings(BaseSettings):
 
     CHROMA_DB_PATH: str = "./chroma_db"
     COLLECTION_NAME: str = "omniai_docs"
+    # Shared staging for RQ worker (e.g. /data/uploads on Railway volume).
+    UPLOAD_STAGING_DIR: str = ""
 
     # local = PyTorch + SentenceTransformer (~1GB+ RAM). Use openai/huggingface on Railway.
     EMBEDDING_PROVIDER: EmbeddingProviderName = "local"
