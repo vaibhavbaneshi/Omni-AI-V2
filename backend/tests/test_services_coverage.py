@@ -28,6 +28,46 @@ def test_build_stream_prompt_includes_context():
     assert len(prompt) > 50
 
 
+def test_build_stream_prompt_requires_professional_answer_structure():
+    prompt = build_stream_prompt(
+        query="Review our vector database architecture",
+        context="Vector databases store embeddings for semantic search.",
+        mode="research",
+    )
+
+    assert 'Start with one clear H1 heading' in prompt
+    assert '"## Explanation"' in prompt
+    assert '"## Key Points"' in prompt
+    assert '"## Summary"' in prompt
+    assert "Synthesize retrieved content" in prompt
+    assert "Never dump raw retrieved chunks" in prompt
+
+
+def test_build_stream_prompt_uses_step_format_for_how_to_requests():
+    prompt = build_stream_prompt(
+        query="How do I build a RAG system?",
+        context="Use chunking, embeddings, retrieval, and answer generation.",
+        mode="research",
+    )
+
+    assert "ANSWER FORMAT (mandatory for process/how-to requests)" in prompt
+    assert '"## Step 1: ..."' in prompt
+    assert '"## Summary"' in prompt
+
+
+def test_build_stream_prompt_uses_comparison_format():
+    prompt = build_stream_prompt(
+        query="Compare LangChain vs LangGraph",
+        context="LangChain is a framework. LangGraph models stateful workflows.",
+        mode="research",
+    )
+
+    assert "ANSWER FORMAT (mandatory for comparison requests)" in prompt
+    assert '"## Feature Comparison"' in prompt
+    assert "Markdown table" in prompt
+    assert '"## Recommendation"' in prompt
+
+
 def test_user_memory_service_crud(db_session):
     from tests.factories import UserFactory
 

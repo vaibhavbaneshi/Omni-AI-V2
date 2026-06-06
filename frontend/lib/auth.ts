@@ -125,7 +125,7 @@ export function consumeAuthExpiredMessage() {
 }
 
 export function handleAuthExpiration(status?: number, message = AUTH_EXPIRED_MESSAGE) {
-  if (typeof window === "undefined" || (status !== 401 && status !== 403)) return false;
+  if (typeof window === "undefined" || status !== 401) return false;
 
   const pathname = window.location.pathname;
   clearAuthState();

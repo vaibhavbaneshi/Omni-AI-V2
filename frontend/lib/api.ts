@@ -100,7 +100,7 @@ export async function apiRequest<T>(
       (typeof body?.error === "string" && body.error) ||
       (typeof body?.message === "string" && body.message) ||
       `Request failed (${response.status} ${response.statusText})`;
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       if (retryAuth && response.status === 401 && !path.startsWith("/auth/")) {
         const refreshedToken = await refreshAccessToken();
         if (refreshedToken) {
@@ -110,10 +110,7 @@ export async function apiRequest<T>(
       handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
     }
 
-    const message =
-      response.status === 401 || response.status === 403
-        ? AUTH_EXPIRED_MESSAGE
-        : detail;
+    const message = response.status === 401 ? AUTH_EXPIRED_MESSAGE : detail;
     throw new ApiError(message, response.status, response.statusText);
   }
 
@@ -584,7 +581,7 @@ export async function streamChat({
       }
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       if (retryAuth && response.status === 401) {
         const refreshedToken = await refreshAccessToken();
         if (refreshedToken) {
@@ -606,9 +603,7 @@ export async function streamChat({
 
     throw new ApiError(
       sanitizeChatError(
-        response.status === 401 || response.status === 403
-          ? AUTH_EXPIRED_MESSAGE
-          : detail,
+        response.status === 401 ? AUTH_EXPIRED_MESSAGE : detail,
         { status: response.status }
       ),
       response.status,

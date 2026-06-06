@@ -481,8 +481,7 @@ export default function ChatPage() {
       setActiveChat(completedChat);
       setChats((prev) => prev.map((c) => (c.id === completedChat.id ? completedChat : c)));
     } catch (error) {
-      const isAuthFailure =
-        error instanceof ApiError && (error.status === 401 || error.status === 403);
+      const isAuthFailure = error instanceof ApiError && error.status === 401;
       const message = sanitizeChatError(
         error instanceof ApiError ? error.message : undefined,
         error instanceof ApiError ? { status: error.status } : undefined
