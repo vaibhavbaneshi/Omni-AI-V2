@@ -37,18 +37,26 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import threading
+
     settings = get_settings()
     settings.validate_for_runtime()
     configure_langsmith_env(settings)
     log_startup_diagnostics(settings)
-    try:
-        run_migrations()
-    except Exception as exc:
-        logger.error("Database migration failed: %s", exc, exc_info=exc)
-        logger.warning(
-            "Continuing startup without migrations; auth and persistence may fail until "
-            "`alembic upgrade head` succeeds."
-        )
+
+    def _migrate_in_background() -> None:
+        try:
+            run_migrations()
+        except Exception as exc:
+            logger.error("Database migration failed: %s", exc, exc_info=exc)
+            logger.warning(
+                "Migrations failed in background; auth and persistence may fail until "
+                "`alembic upgrade head` succeeds."
+            )
+
+    # Do not block HTTP startup — Railway health checks time out while alembic runs.
+    threading.Thread(target=_migrate_in_background, name="db-migrate", daemon=True).start()
+
     startup = run_startup_checks()
     logger.info("Startup complete: %s", startup.get("status"))
     if settings.INGEST_IN_BACKGROUND:

@@ -12,12 +12,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend /app/backend
 
-RUN chmod +x /app/backend/scripts/railway_web_and_worker.sh
+RUN chmod +x /app/backend/scripts/railway_web_and_worker.sh \
+    && chmod +x /app/backend/scripts/railway_start.sh
 
 ENV PYTHONUNBUFFERED=1
 ENV ENVIRONMENT=production
 
 EXPOSE 8000
 
-# Railway injects $PORT — do not hardcode 8000 in production.
+# Default: API only. For API+worker set Railway Custom Start Command to:
+#   sh /app/backend/scripts/railway_start.sh
+# and env START_RQ_WORKER=true
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
