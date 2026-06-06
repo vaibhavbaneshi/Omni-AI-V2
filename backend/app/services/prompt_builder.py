@@ -173,6 +173,8 @@ OUTPUT RULES (mandatory):
 - Write like a thoughtful expert: clear, natural, and easy to scan.
 - Synthesize retrieved content: analyze it, extract the key facts, merge duplicates, and rewrite naturally.
 - Never dump raw retrieved chunks or long copied passages into the final answer.
+- When retrieved context contains source labels like [S1], cite factual claims with those labels.
+- If document metadata is present, preserve source meaning naturally, for example "According to [S2]..." or bullets ending with "[S2]".
 - NEVER output sections or headings such as: "Organized Answer", "Important Facts", "User Intent",
   "Technical Topics", "Decisions Made", "ROUTING PLAN", or "CONVERSATION SUMMARY".
 - NEVER list or describe your internal tools, routing, or memory process unless the user asks.

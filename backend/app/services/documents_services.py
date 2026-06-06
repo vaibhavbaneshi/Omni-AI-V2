@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.app_settings import get_settings
 from app.core.chroma_client import get_or_create_collection
 from app.core.sanitize import detect_prompt_injection
-from app.services.document_loaders import load_document
+from app.services.document_loaders import LoadedDocumentPart, load_document_parts
 from app.services.embedding_service import encode_texts
 from app.services.indexing_progress import update_indexing_progress
 from app.services.ingestion_telemetry import IngestionContext
@@ -54,6 +54,54 @@ def chunk_text(text: str) -> list[str]:
     return chunks
 
 
+def _truncate_parts(parts: list[LoadedDocumentPart], max_chars: int) -> list[LoadedDocumentPart]:
+    truncated: list[LoadedDocumentPart] = []
+    remaining = max_chars
+    for part in parts:
+        if remaining <= 0:
+            break
+        text = part.text[:remaining]
+        if text.strip():
+            truncated.append(LoadedDocumentPart(text=text, metadata=dict(part.metadata)))
+        remaining -= len(text)
+    return truncated
+
+
+def chunk_document_parts(parts: list[LoadedDocumentPart]) -> list[dict]:
+    settings = get_settings()
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.INGEST_CHUNK_SIZE,
+        chunk_overlap=settings.INGEST_CHUNK_OVERLAP,
+        length_function=len,
+    )
+    documents = splitter.create_documents(
+        [part.text for part in parts],
+        metadatas=[dict(part.metadata) for part in parts],
+    )
+
+    seen: set[str] = set()
+    chunks: list[dict] = []
+    for document in documents:
+        normalized = document.page_content.strip()
+        if len(normalized) < 32:
+            continue
+        dedupe_key = normalized.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        chunks.append({"text": normalized, "metadata": dict(document.metadata or {})})
+
+    if len(chunks) > settings.INGEST_MAX_CHUNKS:
+        logger.warning(
+            "Truncating document from %s to %s chunks (INGEST_MAX_CHUNKS)",
+            len(chunks),
+            settings.INGEST_MAX_CHUNKS,
+        )
+        chunks = chunks[: settings.INGEST_MAX_CHUNKS]
+
+    return chunks
+
+
 def store_chunks(
     chunks,
     filename,
@@ -77,7 +125,8 @@ def store_chunks(
         update_indexing_progress(db, document_id, stage="embedding")
 
     for start in range(0, total, batch_size):
-        batch = chunks[start : start + batch_size]
+        raw_batch = chunks[start : start + batch_size]
+        batch = [item["text"] if isinstance(item, dict) else item for item in raw_batch]
         batch_num = start // batch_size + 1
         batch_total = (total + batch_size - 1) // batch_size
 
@@ -117,7 +166,13 @@ def store_chunks(
                 "session_id": str(session_id or ""),
                 "document_id": str(document_id or ""),
                 "chunk_index": start + index,
+                "chunk_id": f"{document_id or filename}:{start + index}",
                 "embedding_version": settings.embedding_model_label,
+                **(
+                    raw_batch[index].get("metadata", {})
+                    if isinstance(raw_batch[index], dict)
+                    else {}
+                ),
             }
             for index, _ in enumerate(batch)
         ]
@@ -162,11 +217,13 @@ def process_document(
 ):
     if telemetry:
         with telemetry.stage("loading", slow_after_seconds=30):
-            text = load_document(file_path)
+            parts = load_document_parts(file_path)
+            text = "\n\n".join(part.text for part in parts)
             char_count = len(text)
             telemetry.log("DOCUMENT_LOADING_COMPLETE", characters=char_count)
     else:
-        text = load_document(file_path)
+        parts = load_document_parts(file_path)
+        text = "\n\n".join(part.text for part in parts)
 
     injection_matches = detect_prompt_injection(text)
     if injection_matches:
@@ -185,17 +242,18 @@ def process_document(
             len(text),
             settings.MAX_INGEST_TEXT_CHARS,
         )
-        text = text[: settings.MAX_INGEST_TEXT_CHARS]
+        parts = _truncate_parts(parts, settings.MAX_INGEST_TEXT_CHARS)
+        text = "\n\n".join(part.text for part in parts)
 
     if db is not None and document_id is not None:
         update_indexing_progress(db, document_id, stage="chunking")
 
     if telemetry:
         with telemetry.stage("chunking", slow_after_seconds=30):
-            chunks = chunk_text(text)
+            chunks = chunk_document_parts(parts)
             telemetry.log("CHUNKING_COMPLETE", chunk_count=len(chunks))
     else:
-        chunks = chunk_text(text)
+        chunks = chunk_document_parts(parts)
 
     del text
     if not chunks:

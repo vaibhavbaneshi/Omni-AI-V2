@@ -5,7 +5,7 @@ import pytest
 
 from app.core.supported_uploads import ALLOWED_EXTENSIONS, SUPPORTED_UPLOADS_LABEL
 from app.core.upload_validation import PDF_MAGIC, sanitize_upload_filename, validate_document_upload
-from app.services.document_loaders import DocumentLoadError, load_document
+from app.services.document_loaders import DocumentLoadError, load_document, load_document_parts
 
 
 def test_supported_extensions_include_common_formats():
@@ -26,6 +26,15 @@ def test_load_txt(tmp_path: Path):
     file_path = tmp_path / "notes.txt"
     file_path.write_text("Hello from a text file.", encoding="utf-8")
     assert load_document(str(file_path)) == "Hello from a text file."
+
+
+def test_load_document_parts_preserves_text_metadata_contract(tmp_path: Path):
+    file_path = tmp_path / "notes.txt"
+    file_path.write_text("Hello from a text file.", encoding="utf-8")
+    parts = load_document_parts(str(file_path))
+    assert len(parts) == 1
+    assert parts[0].text == "Hello from a text file."
+    assert parts[0].metadata == {}
 
 
 def test_load_markdown(tmp_path: Path):

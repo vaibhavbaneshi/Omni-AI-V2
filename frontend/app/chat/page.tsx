@@ -1741,6 +1741,16 @@ function SourceCard({
   source: SourceCitation;
   index: number;
 }) {
+  const metadata = source.metadata || {};
+  const citationId = typeof metadata.citation_id === "string" ? metadata.citation_id : `S${index + 1}`;
+  const pageNumber =
+    typeof metadata.page_number === "number" || typeof metadata.page_number === "string"
+      ? metadata.page_number
+      : null;
+  const chunkId = typeof metadata.chunk_id === "string" ? metadata.chunk_id : null;
+  const sourceReference =
+    typeof metadata.source_reference === "string" ? metadata.source_reference : null;
+
   const body = (
     <div className="group/source flex w-[190px] shrink-0 flex-col justify-between gap-2 rounded-xl border border-white/5 bg-[#050505] px-3 py-2.5 shadow-inner transition-colors hover:bg-white/[0.03]">
       <div className="flex items-center gap-2">
@@ -1754,12 +1764,17 @@ function SourceCard({
           )}
         </div>
         <span className="truncate text-[10px] text-muted-foreground/60">
-          {source.source || source.title || `Source ${index + 1}`}
+          [{citationId}] {source.source || source.title || `Source ${index + 1}`}
         </span>
       </div>
       <span className="line-clamp-2 text-[12px] font-medium leading-snug text-foreground/85 transition-colors group-hover/source:text-foreground">
         {source.title || source.source || `Retrieved chunk ${index + 1}`}
       </span>
+      {(sourceReference || pageNumber || chunkId) && (
+        <span className="truncate text-[10px] text-muted-foreground/45">
+          {sourceReference || `${pageNumber ? `Page ${pageNumber}` : ""}${pageNumber && chunkId ? " · " : ""}${chunkId ? `Chunk ${chunkId}` : ""}`}
+        </span>
+      )}
       <div className="flex items-center justify-between text-[10px] text-muted-foreground/45">
         <span>{source.type === "web" ? "live web" : source.type === "memory" ? "memory" : source.strategy || "retrieval"}</span>
         {typeof source.score === "number" && <span>{Math.round(source.score * 100)}%</span>}

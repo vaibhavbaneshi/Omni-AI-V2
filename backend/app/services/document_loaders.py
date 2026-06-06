@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -17,6 +18,12 @@ class DocumentLoadError(Exception):
     """Raised when text cannot be extracted from an uploaded file."""
 
 
+@dataclass(frozen=True)
+class LoadedDocumentPart:
+    text: str
+    metadata: dict
+
+
 def _normalize_text(text: str) -> str:
     cleaned = (text or "").replace("\x00", " ").strip()
     if not cleaned:
@@ -25,16 +32,29 @@ def _normalize_text(text: str) -> str:
 
 
 def load_pdf(file_path: str) -> str:
+    return _normalize_text("\n".join(part.text for part in load_pdf_parts(file_path)))
+
+
+def load_pdf_parts(file_path: str) -> list[LoadedDocumentPart]:
     try:
         reader = PdfReader(file_path)
-        parts: list[str] = []
-        for page in reader.pages:
+        parts: list[LoadedDocumentPart] = []
+        for index, page in enumerate(reader.pages):
             extracted = page.extract_text()
-            if extracted:
-                parts.append(extracted)
-        return _normalize_text("\n".join(parts))
+            if extracted and extracted.strip():
+                parts.append(
+                    LoadedDocumentPart(
+                        text=_normalize_text(extracted),
+                        metadata={"page_number": index + 1},
+                    )
+                )
+        if not parts:
+            raise DocumentLoadError("No readable text was found in the file.")
+        return parts
     except PdfStreamError as exc:
         raise DocumentLoadError("Invalid or corrupted PDF file.") from exc
+    except DocumentLoadError:
+        raise
     except Exception as exc:
         raise DocumentLoadError(f"PDF processing failed: {exc}") from exc
 
@@ -47,6 +67,10 @@ def load_txt(file_path: str) -> str:
         except UnicodeDecodeError:
             continue
     raise DocumentLoadError("Could not decode text file. Use UTF-8 encoding.")
+
+
+def load_txt_parts(file_path: str) -> list[LoadedDocumentPart]:
+    return [LoadedDocumentPart(text=load_txt(file_path), metadata={})]
 
 
 def load_docx(file_path: str) -> str:
@@ -70,6 +94,10 @@ def load_docx(file_path: str) -> str:
         raise DocumentLoadError(f"DOCX processing failed: {exc}") from exc
 
 
+def load_docx_parts(file_path: str) -> list[LoadedDocumentPart]:
+    return [LoadedDocumentPart(text=load_docx(file_path), metadata={})]
+
+
 def load_csv(file_path: str) -> str:
     try:
         raw = Path(file_path).read_text(encoding="utf-8-sig")
@@ -79,6 +107,10 @@ def load_csv(file_path: str) -> str:
         return _normalize_text("\n".join(rows))
     except Exception as exc:
         raise DocumentLoadError(f"CSV processing failed: {exc}") from exc
+
+
+def load_csv_parts(file_path: str) -> list[LoadedDocumentPart]:
+    return [LoadedDocumentPart(text=load_csv(file_path), metadata={})]
 
 
 def load_xlsx(file_path: str) -> str:
@@ -102,6 +134,10 @@ def load_xlsx(file_path: str) -> str:
         return _normalize_text("\n".join(parts))
     except Exception as exc:
         raise DocumentLoadError(f"Excel processing failed: {exc}") from exc
+
+
+def load_xlsx_parts(file_path: str) -> list[LoadedDocumentPart]:
+    return [LoadedDocumentPart(text=load_xlsx(file_path), metadata={})]
 
 
 def load_xls(file_path: str) -> str:
@@ -130,7 +166,15 @@ def load_xls(file_path: str) -> str:
         raise DocumentLoadError(f"Excel (.xls) processing failed: {exc}") from exc
 
 
+def load_xls_parts(file_path: str) -> list[LoadedDocumentPart]:
+    return [LoadedDocumentPart(text=load_xls(file_path), metadata={})]
+
+
 def load_document(file_path: str) -> str:
+    return _normalize_text("\n".join(part.text for part in load_document_parts(file_path)))
+
+
+def load_document_parts(file_path: str) -> list[LoadedDocumentPart]:
     extension = os.path.splitext(file_path)[1].lower()
     if extension not in ALLOWED_EXTENSIONS:
         raise DocumentLoadError(
@@ -139,16 +183,16 @@ def load_document(file_path: str) -> str:
         )
 
     if extension == ".pdf":
-        return load_pdf(file_path)
+        return load_pdf_parts(file_path)
     if extension in {".txt", ".md", ".markdown"}:
-        return load_txt(file_path)
+        return load_txt_parts(file_path)
     if extension == ".docx":
-        return load_docx(file_path)
+        return load_docx_parts(file_path)
     if extension == ".csv":
-        return load_csv(file_path)
+        return load_csv_parts(file_path)
     if extension == ".xlsx":
-        return load_xlsx(file_path)
+        return load_xlsx_parts(file_path)
     if extension == ".xls":
-        return load_xls(file_path)
+        return load_xls_parts(file_path)
 
     raise DocumentLoadError(f"Unsupported file type '{extension}'.")

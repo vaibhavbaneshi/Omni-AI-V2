@@ -31,6 +31,7 @@ from app.services.hybrid_search import (
 )
 
 from app.core.sanitize import sanitize_retrieved_context
+from app.services.citation_service import format_cited_context, normalize_citations
 from app.core.telemetry import traced_span
 from app.services.retrieval_cache import (
     cache_retrieval_result,
@@ -124,8 +125,6 @@ def retrieve_context_details(
         top_k=3
     ) if chunks else []
 
-    context = sanitize_retrieved_context(reranked_chunks)
-
     ranked_sources = []
 
     for chunk in reranked_chunks:
@@ -141,6 +140,10 @@ def retrieve_context_details(
 
         if source:
             ranked_sources.append(source)
+
+    ranked_sources = normalize_citations(ranked_sources)
+    context_chunks = format_cited_context(ranked_sources) if ranked_sources else reranked_chunks
+    context = sanitize_retrieved_context(context_chunks)
 
     return {
         "context": context,
@@ -224,16 +227,19 @@ def retrieve_session_document_context(
     else:
         reranked = chunks[:max_chunks]
 
-    context = sanitize_retrieved_context(reranked, max_chunks=max_chunks)
     ranked_sources = []
     for chunk in reranked:
         source = next((item for item in sources if item.get("chunk") == chunk), None)
         if source:
             ranked_sources.append(source)
 
+    ranked_sources = normalize_citations(ranked_sources or sources[: len(reranked)])
+    context_chunks = format_cited_context(ranked_sources) if ranked_sources else reranked
+    context = sanitize_retrieved_context(context_chunks, max_chunks=max_chunks)
+
     return {
         "context": context,
-        "sources": ranked_sources or sources[: len(reranked)],
+        "sources": ranked_sources,
         "strategy": "session-documents",
         "chunks": len(reranked),
     }
