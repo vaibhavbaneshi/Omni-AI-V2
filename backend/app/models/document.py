@@ -137,6 +137,12 @@ class DocumentRecord(Base):
         default=0,
     )
 
+    indexing_job_id = Column(
+        String,
+        nullable=True,
+        index=True,
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow

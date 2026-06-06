@@ -24,6 +24,7 @@ from app.api.evaluation_routes import router as evaluation_router
 from app.api.analytics_routes import router as analytics_router
 from app.api.model_routes import router as model_router
 from app.api.settings_routes import router as settings_router
+from app.api.queue_routes import router as queue_router
 from app.middleware.production import (
     InMemoryRateLimitMiddleware,
     SecurityHeadersMiddleware,
@@ -51,10 +52,16 @@ async def lifespan(app: FastAPI):
     startup = run_startup_checks()
     logger.info("Startup complete: %s", startup.get("status"))
     if settings.INGEST_IN_BACKGROUND:
-        logger.info(
-            "Document indexing: background tasks enabled (INGEST_IN_BACKGROUND=true). "
-            "If uploads stay 'Queued', avoid uvicorn --reload or set INGEST_IN_BACKGROUND=false."
-        )
+        if settings.ingest_uses_rq_queue:
+            logger.info(
+                "Document indexing: RQ queue (INGEST_QUEUE_ENABLED=true, redis=%s)",
+                settings.redis_url.split("@")[-1] if settings.redis_url else "unset",
+            )
+        else:
+            logger.info(
+                "Document indexing: in-process BackgroundTasks (INGEST_QUEUE_ENABLED=false). "
+                "Jobs are lost on process restart — enable Redis + RQ for production."
+            )
     else:
         logger.info("Document indexing: synchronous (INGEST_IN_BACKGROUND=false)")
     if settings.EMBEDDING_PROVIDER == "local":
@@ -145,3 +152,4 @@ app.include_router(evaluation_router)
 app.include_router(analytics_router)
 app.include_router(model_router)
 app.include_router(settings_router)
+app.include_router(queue_router)

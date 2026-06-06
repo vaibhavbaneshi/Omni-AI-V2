@@ -81,6 +81,17 @@ class AppSettings(BaseSettings):
     CHROMA_ADD_BATCH_SIZE: int = 128
     PRELOAD_EMBEDDING_MODEL: bool = True
     INGEST_IN_BACKGROUND: bool = True
+    # Sprint 1 — durable ingestion via Redis + RQ (replaces in-process BackgroundTasks).
+    INGEST_QUEUE_ENABLED: bool = True
+    REDIS_URL: str = ""
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: str = ""
+    INGEST_JOB_MAX_RETRIES: int = 3
+    INGEST_JOB_RETRY_INTERVALS: str = "30,60,120"
+    INGEST_JOB_RESULT_TTL_SECONDS: int = 86400
+    INGEST_JOB_FAILURE_TTL_SECONDS: int = 604800
     # CrossEncoder reranker adds ~300MB RAM — disable on memory-constrained deploys.
     ENABLE_RERANKER: bool = True
 
@@ -171,6 +182,25 @@ class AppSettings(BaseSettings):
         return self.EMBEDDING_MODEL
 
     @property
+    def redis_url(self) -> str:
+        if self.REDIS_URL.strip():
+            return self.REDIS_URL.strip()
+        if not self.REDIS_HOST.strip():
+            return ""
+        password = self.REDIS_PASSWORD.strip()
+        auth = f":{password}@" if password else ""
+        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    @property
+    def ingest_job_retry_intervals(self) -> list[int]:
+        parts = [part.strip() for part in self.INGEST_JOB_RETRY_INTERVALS.split(",") if part.strip()]
+        return [max(1, int(part)) for part in parts] or [30, 60, 120]
+
+    @property
+    def ingest_uses_rq_queue(self) -> bool:
+        return self.INGEST_QUEUE_ENABLED and bool(self.redis_url)
+
+    @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
@@ -219,6 +249,10 @@ class AppSettings(BaseSettings):
                 logging.getLogger(__name__).warning(
                     "ENABLE_RERANKER=true loads CrossEncoder (~300MB). "
                     "Set ENABLE_RERANKER=false on memory-constrained deploys."
+                )
+            if self.INGEST_IN_BACKGROUND and self.INGEST_QUEUE_ENABLED and not self.redis_url:
+                raise RuntimeError(
+                    "REDIS_URL (or REDIS_HOST) must be set when INGEST_QUEUE_ENABLED=true in production."
                 )
 
 

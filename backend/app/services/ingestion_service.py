@@ -19,29 +19,34 @@ MAX_INDEXING_SECONDS = 900  # 15 minutes — matches frontend stale detection
 QUEUED_STALE_SECONDS = 45  # no progress from queued → likely background task never ran
 
 
-def run_ingest_document_record(document_id: int) -> None:
-    """Entry point for FastAPI BackgroundTasks — never swallow errors silently."""
-    import os
-
+def run_ingest_document_record(document_id: int, job_id: str | None = None) -> None:
+    """Entry point for BackgroundTasks or direct sync invoke."""
     task_logger = logging.getLogger("omniai.ingestion")
     task_logger.info(
-        "[INGEST_TASK_START] document_id=%s pid=%s embedding_provider=%s",
+        "[INGEST_TASK_START] job_id=%s document_id=%s pid=%s embedding_provider=%s",
+        job_id,
         document_id,
         os.getpid(),
         __import__("app.core.app_settings", fromlist=["get_settings"]).get_settings().EMBEDDING_PROVIDER,
     )
     try:
-        ingest_document_record(document_id)
-        task_logger.info("[INGEST_TASK_COMPLETE] document_id=%s", document_id)
+        ingest_document_record(document_id, job_id=job_id)
+        task_logger.info("[INGEST_TASK_COMPLETE] job_id=%s document_id=%s", job_id, document_id)
     except Exception:
         task_logger.exception(
-            "[INGEST_TASK_CRASHED] document_id=%s — see traceback above",
+            "[INGEST_TASK_CRASHED] job_id=%s document_id=%s — see traceback above",
+            job_id,
             document_id,
         )
         raise
 
 
-def ingest_document_record(document_id: int) -> None:
+def ingest_document_record(
+    document_id: int,
+    job_id: str | None = None,
+    *,
+    propagate_errors: bool = False,
+) -> None:
     db = SessionLocal()
     started = time.perf_counter()
     document = None
@@ -70,6 +75,7 @@ def ingest_document_record(document_id: int) -> None:
             "UPLOAD_COMPLETE",
             size=document.file_size,
             path=document.storage_path,
+            job_id=job_id or document.indexing_job_id,
         )
 
         update_indexing_progress(
@@ -122,13 +128,16 @@ def ingest_document_record(document_id: int) -> None:
 
         if document:
             try:
-                mark_indexing_failed(db, document.id, str(exc))
+                if not propagate_errors:
+                    mark_indexing_failed(db, document.id, str(exc))
             except Exception:
                 db.rollback()
                 logger.exception(
                     "Failed to persist indexing failure document_id=%s",
                     document.id,
                 )
+        if propagate_errors:
+            raise
     finally:
         if document and document.storage_path and os.path.exists(document.storage_path):
             if document.indexing_stage == "ready":
@@ -168,9 +177,8 @@ def detect_stale_indexing(document: DocumentRecord) -> str | None:
     if document.indexing_stage == "queued" and elapsed > QUEUED_STALE_SECONDS:
         return (
             f"Indexing stuck at 'queued' for {int(elapsed)}s. "
-            "The background worker likely never started — restart the backend without "
-            "--reload, set INGEST_IN_BACKGROUND=false for sync debugging, or check logs "
-            "for [INGEST_TASK_START] / [INGEST_TASK_CRASHED]."
+            "The ingestion worker may not be running — start `python -m app.worker`, "
+            "verify REDIS_URL, or check queue metrics at GET /admin/ingestion-queue/metrics."
         )
 
     if elapsed > MAX_INDEXING_SECONDS:

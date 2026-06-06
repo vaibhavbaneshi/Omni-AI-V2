@@ -98,4 +98,5 @@ def document_status_payload(document: DocumentRecord) -> dict:
         else None,
         "elapsed_seconds": elapsed_seconds,
         "status": status,
+        "indexing_job_id": document.indexing_job_id,
     }

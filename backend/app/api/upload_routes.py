@@ -22,6 +22,11 @@ from app.core.app_settings import get_settings
 from app.core.upload_validation import sanitize_upload_filename, validate_document_upload
 from app.services.indexing_progress import document_status_payload, update_indexing_progress
 from app.services.ingestion_service import detect_stale_indexing, run_ingest_document_record
+from app.services.ingestion_queue import (
+    enqueue_document_ingestion,
+    ingest_queue_enabled,
+    should_use_background_tasks,
+)
 from app.services.usage_tracking_service import record_ingestion_event
 from app.services.file_scanner import FileScanError, scan_uploaded_file
 from app.services.security_audit_service import audit_log
@@ -214,19 +219,39 @@ async def upload_document(
     db.refresh(document)
 
     if settings.INGEST_IN_BACKGROUND:
-        update_indexing_progress(db, document.id, stage="queued", mark_started=True)
-        background_tasks.add_task(run_ingest_document_record, document.id)
-        logger.info(
-            "[INGEST_QUEUED] document_id=%s filename=%s size=%s user_id=%s session_id=%s "
-            "storage_path=%s embedding_provider=%s — watch for [INGEST_TASK_START] in logs",
-            document.id,
-            safe_name,
-            file_size,
-            current_user.id,
-            session_id,
-            file_path,
-            settings.EMBEDDING_PROVIDER,
-        )
+        if ingest_queue_enabled():
+            job_id = enqueue_document_ingestion(db, document.id)
+            logger.info(
+                "[INGEST_QUEUED] document_id=%s job_id=%s filename=%s size=%s user_id=%s session_id=%s "
+                "storage_path=%s embedding_provider=%s dispatch=rq",
+                document.id,
+                job_id,
+                safe_name,
+                file_size,
+                current_user.id,
+                session_id,
+                file_path,
+                settings.EMBEDDING_PROVIDER,
+            )
+        elif should_use_background_tasks():
+            update_indexing_progress(db, document.id, stage="queued", mark_started=True)
+            background_tasks.add_task(run_ingest_document_record, document.id)
+            logger.info(
+                "[INGEST_QUEUED] document_id=%s filename=%s size=%s user_id=%s session_id=%s "
+                "storage_path=%s embedding_provider=%s dispatch=background_tasks",
+                document.id,
+                safe_name,
+                file_size,
+                current_user.id,
+                session_id,
+                file_path,
+                settings.EMBEDDING_PROVIDER,
+            )
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="Background ingestion is enabled but no dispatch backend is configured.",
+            )
         return {
             "message": "Document uploaded. Indexing in background.",
             "filename": safe_name,
