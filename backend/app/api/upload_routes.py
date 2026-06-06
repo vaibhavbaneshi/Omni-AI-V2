@@ -13,16 +13,15 @@ from fastapi import (
 )
 
 from app.services.document_loaders import DocumentLoadError
-from app.services.documents_services import get_document_collection, process_document
+from app.services.documents_services import get_document_collection
 
 from app.core.security import (
     get_current_user
 )
 from app.core.app_settings import get_settings
 from app.core.upload_validation import sanitize_upload_filename, validate_document_upload
-from app.core.telemetry import traced_span
 from app.services.indexing_progress import document_status_payload, update_indexing_progress
-from app.services.ingestion_service import detect_stale_indexing, ingest_document_record
+from app.services.ingestion_service import detect_stale_indexing, run_ingest_document_record
 from app.services.usage_tracking_service import record_ingestion_event
 from app.services.file_scanner import FileScanError, scan_uploaded_file
 from app.services.security_audit_service import audit_log
@@ -216,14 +215,17 @@ async def upload_document(
 
     if settings.INGEST_IN_BACKGROUND:
         update_indexing_progress(db, document.id, stage="queued", mark_started=True)
-        background_tasks.add_task(ingest_document_record, document.id)
+        background_tasks.add_task(run_ingest_document_record, document.id)
         logger.info(
-            "Upload queued for background indexing document_id=%s filename=%s size=%s user_id=%s session_id=%s",
+            "[INGEST_QUEUED] document_id=%s filename=%s size=%s user_id=%s session_id=%s "
+            "storage_path=%s embedding_provider=%s — watch for [INGEST_TASK_START] in logs",
             document.id,
             safe_name,
             file_size,
             current_user.id,
             session_id,
+            file_path,
+            settings.EMBEDDING_PROVIDER,
         )
         return {
             "message": "Document uploaded. Indexing in background.",
@@ -234,34 +236,24 @@ async def upload_document(
             "document_id": document.id,
         }
 
+    logger.info(
+        "[INGEST_SYNC_START] document_id=%s filename=%s embedding_provider=%s",
+        document.id,
+        safe_name,
+        settings.EMBEDDING_PROVIDER,
+    )
     ingest_started = time.perf_counter()
     try:
-        with traced_span(
-            "document.ingest",
-            user_id=current_user.id,
-            filename=safe_name,
-            session_id=session_id,
-        ):
-            chunk_count = process_document(
-                file_path=file_path,
-                filename=safe_name,
-                user_id=current_user.id,
-                workspace_id=workspace_id,
-                collection_id=collection_record.id,
-                session_id=session_id,
-                document_id=document.id
+        run_ingest_document_record(document.id)
+        db.refresh(document)
+        if document.indexing_stage == "failed":
+            raise HTTPException(
+                status_code=400,
+                detail=document.indexing_error or "Document indexing failed.",
             )
-
-        document.chunks_created = chunk_count
-        db.commit()
-        record_ingestion_event(
-            user_id=current_user.id,
-            filename=safe_name,
-            chunks_created=chunk_count,
-            duration_ms=round((time.perf_counter() - ingest_started) * 1000, 2),
-            success=True,
-        )
-
+        chunk_count = document.chunks_created
+    except HTTPException:
+        raise
     except DocumentLoadError as e:
         record_ingestion_event(
             user_id=current_user.id,
@@ -271,53 +263,29 @@ async def upload_document(
             success=False,
             error_message=str(e),
         )
-        db.delete(document)
-        db.commit()
-        if os.path.exists(file_path):
-            os.remove(file_path)
         logger.warning(
-            "Document processing failed filename=%s document_id=%s user_id=%s session_id=%s error=%s",
-            safe_name,
+            "[INGEST_SYNC_FAILED] document_id=%s error=%s",
             document.id,
-            current_user.id,
-            session_id,
             str(e),
             exc_info=True,
         )
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        db.delete(document)
-        db.commit()
-        if os.path.exists(file_path):
-            os.remove(file_path)
         logger.exception(
-            "Unexpected document processing failure filename=%s document_id=%s user_id=%s session_id=%s",
-            safe_name,
+            "[INGEST_SYNC_FAILED] document_id=%s unexpected error",
             document.id,
-            current_user.id,
-            session_id,
         )
-
         raise HTTPException(
             status_code=500,
-            detail="Document upload failed during processing. Check backend logs for details."
+            detail="Document upload failed during processing. Check backend logs for [INGEST_*] lines.",
         ) from e
 
-    if os.path.exists(file_path):
-        os.remove(file_path)
-        try:
-            os.rmdir(user_upload_dir)
-        except OSError:
-            pass
-
     logger.info(
-        "Upload processed successfully document_id=%s filename=%s size=%s chunks=%s user_id=%s session_id=%s",
+        "[INGEST_SYNC_COMPLETE] document_id=%s filename=%s chunks=%s duration_ms=%.0f",
         document.id,
         safe_name,
-        file_size,
         chunk_count,
-        current_user.id,
-        session_id,
+        (time.perf_counter() - ingest_started) * 1000,
     )
 
     return {
@@ -423,6 +391,13 @@ def get_document_status(
     if stale_message and payload["status"] == "indexing":
         payload["stale"] = True
         payload["stale_message"] = stale_message
+        logger.warning(
+            "[INGEST_STALE] document_id=%s stage=%s elapsed=%s message=%s",
+            document.id,
+            document.indexing_stage,
+            payload.get("elapsed_seconds"),
+            stale_message,
+        )
     return payload
 
 

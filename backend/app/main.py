@@ -50,6 +50,18 @@ async def lifespan(app: FastAPI):
         )
     startup = run_startup_checks()
     logger.info("Startup complete: %s", startup.get("status"))
+    if settings.INGEST_IN_BACKGROUND:
+        logger.info(
+            "Document indexing: background tasks enabled (INGEST_IN_BACKGROUND=true). "
+            "If uploads stay 'Queued', avoid uvicorn --reload or set INGEST_IN_BACKGROUND=false."
+        )
+    else:
+        logger.info("Document indexing: synchronous (INGEST_IN_BACKGROUND=false)")
+    if settings.EMBEDDING_PROVIDER == "local":
+        logger.warning(
+            "EMBEDDING_PROVIDER=local loads PyTorch in-process — first upload may take "
+            "1-3 min while the model loads. For faster local dev use EMBEDDING_PROVIDER=huggingface."
+        )
     if settings.PRELOAD_EMBEDDING_MODEL and settings.EMBEDDING_PROVIDER == "local":
         import threading
 

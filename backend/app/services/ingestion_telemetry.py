@@ -37,7 +37,7 @@ class IngestionContext:
     session_id: int | None = None
     started_at: float = field(default_factory=time.perf_counter)
     stage_started_at: float = field(default_factory=time.perf_counter)
-    stage: str = "queued"
+    current_stage: str = "queued"
 
     def log(self, event: str, level: int = logging.INFO, **fields: Any) -> None:
         elapsed_ms = round((time.perf_counter() - self.started_at) * 1000, 1)
@@ -49,13 +49,13 @@ class IngestionContext:
             "filename": self.filename,
             "user_id": self.user_id,
             "session_id": self.session_id,
-            "stage": self.stage,
+            "stage": self.current_stage,
             "elapsed_ms": elapsed_ms,
             "stage_ms": stage_ms,
             "memory_mb": memory_mb,
             **fields,
         }
-        parts = [f"[{event}]", f"document_id={self.document_id}", f"stage={self.stage}"]
+        parts = [f"[{event}]", f"document_id={self.document_id}", f"stage={self.current_stage}"]
         for key, value in fields.items():
             parts.append(f"{key}={value}")
         parts.append(f"elapsed_ms={elapsed_ms}")
@@ -76,8 +76,8 @@ class IngestionContext:
 
     @contextmanager
     def stage(self, name: str, slow_after_seconds: float | None = None):
-        previous = self.stage
-        self.stage = name
+        previous = self.current_stage
+        self.current_stage = name
         self.stage_started_at = time.perf_counter()
         self.log(f"{name.upper()}_START")
         try:
@@ -92,12 +92,12 @@ class IngestionContext:
             logger.exception(
                 "[ERROR] document_id=%s stage=%s error=%s",
                 self.document_id,
-                self.stage,
+                self.current_stage,
                 exc,
             )
             raise
         finally:
-            self.stage = previous
+            self.current_stage = previous
             self.stage_started_at = time.perf_counter()
 
 

@@ -38,15 +38,13 @@ def test_encode_huggingface_uses_inference_api(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "hf_test")
     get_settings.cache_clear()
 
-    mock_response = MagicMock()
-    mock_response.json.return_value = [[3.0, 4.0]]
-    mock_response.raise_for_status = MagicMock()
     mock_client = MagicMock()
-    mock_client.post.return_value = mock_response
-    mock_client.__enter__ = MagicMock(return_value=mock_client)
-    mock_client.__exit__ = MagicMock(return_value=False)
+    mock_client.feature_extraction.return_value = [[3.0, 4.0]]
 
-    with patch("app.services.embedding_service.httpx.Client", return_value=mock_client):
+    with patch(
+        "app.services.embedding_service._get_huggingface_client",
+        return_value=mock_client,
+    ):
         from app.services.embedding_service import encode_texts
 
         vectors = encode_texts(["hello"])
@@ -54,6 +52,7 @@ def test_encode_huggingface_uses_inference_api(monkeypatch):
     assert len(vectors) == 1
     assert vectors[0][0] == pytest.approx(0.6)
     assert vectors[0][1] == pytest.approx(0.8)
+    mock_client.feature_extraction.assert_called_once()
 
 
 def test_production_blocks_local_embeddings_without_flag(monkeypatch):

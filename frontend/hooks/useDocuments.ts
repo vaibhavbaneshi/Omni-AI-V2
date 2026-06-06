@@ -173,10 +173,9 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
           if (merged.status === "ready") becameReady = true;
           if (merged.status === "failed") becameFailed = true;
           if (merged.status === "indexing") {
-            progressMessage = `${merged.filename}: ${indexingStageLabel(merged)}`;
-            if (merged.stale_message) {
-              progressMessage = merged.stale_message;
-            }
+            progressMessage = update.stale_message
+              ? update.stale_message
+              : `${merged.filename}: ${indexingStageLabel(merged)}`;
           }
           return [merged];
         });

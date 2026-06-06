@@ -16,6 +16,8 @@ _model = None
 _model_lock = threading.Lock()
 _openai_client = None
 _openai_lock = threading.Lock()
+_hf_client = None
+_hf_lock = threading.Lock()
 
 
 def _l2_normalize(vector: list[float]) -> list[float]:
@@ -73,72 +75,96 @@ def _encode_openai(texts: list[str]) -> list[list[float]]:
     return all_vectors
 
 
+def _get_huggingface_client():
+    global _hf_client
+    if _hf_client is not None:
+        return _hf_client
+
+    with _hf_lock:
+        if _hf_client is None:
+            settings = get_settings()
+            api_key = settings.huggingface_api_key
+            if not api_key:
+                raise RuntimeError(
+                    "HUGGINGFACE_API_KEY or HF_TOKEN is required when EMBEDDING_PROVIDER=huggingface"
+                )
+            from huggingface_hub import InferenceClient
+
+            _hf_client = InferenceClient(token=api_key, timeout=90.0)
+        return _hf_client
+
+
+def _hf_error_retryable(exc: Exception) -> bool:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status in {429, 503, 504}:
+        return True
+    if status is not None and status < 500:
+        return False
+    if isinstance(exc, (httpx.HTTPError, TimeoutError)):
+        return True
+    return exc.__class__.__name__ in {
+        "HfHubHTTPError",
+        "ReadTimeout",
+        "ConnectTimeout",
+    }
+
+
 def _encode_huggingface(texts: list[str], telemetry=None) -> list[list[float]]:
     settings = get_settings()
-    api_key = settings.huggingface_api_key
-    if not api_key:
-        raise RuntimeError(
-            "HUGGINGFACE_API_KEY or HF_TOKEN is required when EMBEDDING_PROVIDER=huggingface"
-        )
-
-    model = settings.EMBEDDING_MODEL
-    url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model}"
+    client = _get_huggingface_client()
     api_batch = max(1, min(settings.EMBEDDING_BATCH_SIZE, 32))
     all_vectors: list[list[float]] = []
 
     import time
 
-    with httpx.Client(timeout=120.0) as client:
-        for start in range(0, len(texts), api_batch):
-            batch = texts[start : start + api_batch]
-            batch_started = time.perf_counter()
-            last_error: Exception | None = None
+    for start in range(0, len(texts), api_batch):
+        batch = texts[start : start + api_batch]
+        batch_started = time.perf_counter()
+        last_error: Exception | None = None
 
-            for attempt in range(1, 4):
-                try:
-                    response = client.post(
-                        url,
-                        headers={"Authorization": f"Bearer {api_key}"},
-                        json={"inputs": batch, "options": {"wait_for_model": True}},
-                    )
-                    if response.status_code in {503, 429}:
-                        raise httpx.HTTPStatusError(
-                            "HF model warming or rate limited",
-                            request=response.request,
-                            response=response,
-                        )
-                    response.raise_for_status()
-                    payload = response.json()
-                    break
-                except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
-                    last_error = exc
-                    if telemetry:
-                        telemetry.log(
-                            "EMBEDDING_RETRY",
-                            level=logging.WARNING,
-                            attempt=attempt,
-                            error=str(exc),
-                        )
-                    time.sleep(min(2 ** attempt, 8))
-            else:
-                raise RuntimeError(
-                    f"HuggingFace embedding failed after retries: {last_error}"
-                ) from last_error
-
-            elapsed = time.perf_counter() - batch_started
-            if elapsed > 60:
-                logger.warning(
-                    "HuggingFace embedding batch slow. Elapsed: %.1fs batch_size=%s",
-                    elapsed,
-                    len(batch),
+        for attempt in range(1, 4):
+            try:
+                result = client.feature_extraction(
+                    batch,
+                    model=settings.EMBEDDING_MODEL,
                 )
+                break
+            except Exception as exc:
+                if not _hf_error_retryable(exc):
+                    raise
+                last_error = exc
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if telemetry:
+                    telemetry.log(
+                        "EMBEDDING_RETRY",
+                        level=logging.WARNING,
+                        attempt=attempt,
+                        error=str(exc),
+                        status_code=status,
+                    )
+                time.sleep(min(2 ** attempt, 8))
+        else:
+            raise RuntimeError(
+                f"HuggingFace embedding failed after retries: {last_error}"
+            ) from last_error
 
-            if len(batch) == 1 and payload and isinstance(payload[0], (int, float)):
-                batch_vectors = [payload]
-            else:
-                batch_vectors = payload
+        elapsed = time.perf_counter() - batch_started
+        if elapsed > 60:
+            logger.warning(
+                "HuggingFace embedding batch slow. Elapsed: %.1fs batch_size=%s",
+                elapsed,
+                len(batch),
+            )
 
-            all_vectors.extend(_l2_normalize(vector) for vector in batch_vectors)
+        import numpy as np
+
+        array = np.asarray(result, dtype=float)
+        if array.ndim == 1:
+            batch_vectors = [array.tolist()]
+        else:
+            batch_vectors = array.tolist()
+
+        all_vectors.extend(_l2_normalize(vector) for vector in batch_vectors)
 
     return all_vectors
 

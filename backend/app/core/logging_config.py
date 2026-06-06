@@ -41,3 +41,11 @@ def setup_logging(log_level: str = "INFO") -> None:
     # Reduce verbosity of some noisy loggers
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+
+    # Ingestion pipeline — always show stage transitions in console during uploads.
+    ingestion_logger = logging.getLogger("omniai.ingestion")
+    ingestion_logger.setLevel(logging.DEBUG)
+    ingestion_logger.propagate = True
+
+    upload_logger = logging.getLogger("app.api.upload_routes")
+    upload_logger.setLevel(logging.DEBUG)
