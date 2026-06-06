@@ -63,16 +63,30 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/admin/ingestion-que
 | `backend` | See below | API + worker in one container |
 | `redis` | Railway Redis plugin | Shared broker |
 
-**Omni-AI-V2 Custom Start Command** (pick one):
+**Omni-AI-V2 Custom Start Command**
+
+Railway runs Dockerfile start commands **without a shell** unless you wrap them.  
+Do **not** use bare `cd ... &&` or `$PORT` — use `sh -c "..."` or leave empty to use the Dockerfile `CMD`.
+
+**Recommended — leave Custom Start Command empty**  
+The Dockerfile already runs:
+
+```dockerfile
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+```
+
+(WORKDIR is `/app/backend` — no `cd` needed.)
+
+**API + RQ worker in one container** (Custom Start Command):
+
+```bash
+sh -c "python -m app.worker & exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+```
+
+**Or use the script** (after deploy includes `backend/scripts/`):
 
 ```bash
 sh /app/backend/scripts/railway_web_and_worker.sh
-```
-
-Or without the script file (works immediately):
-
-```bash
-cd /app/backend && python -m app.worker & exec uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
 Do **not** use a separate `ingest-worker` service on Railway unless you add shared object storage — use one service for API + worker.
