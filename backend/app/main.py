@@ -43,61 +43,63 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     import threading
 
-    settings = get_settings()
-    settings.validate_for_runtime()
-    configure_langsmith_env(settings)
-    log_startup_diagnostics(settings)
+    app.state.ready = False
+    app.state.startup_error = None
 
-    def _migrate_in_background() -> None:
+    def _startup() -> None:
         try:
-            run_migrations()
+            settings = get_settings()
+            settings.validate_for_runtime()
+            configure_langsmith_env(settings)
+            log_startup_diagnostics(settings)
+
+            def _migrate() -> None:
+                try:
+                    run_migrations()
+                except Exception as exc:
+                    logger.error("Database migration failed: %s", exc, exc_info=exc)
+
+            threading.Thread(target=_migrate, name="db-migrate", daemon=True).start()
+
+            startup = run_startup_checks()
+            logger.info("Startup complete: %s", startup.get("status"))
+            if settings.INGEST_IN_BACKGROUND:
+                if settings.ingest_uses_rq_queue:
+                    logger.info(
+                        "Document indexing: RQ queue (INGEST_QUEUE_ENABLED=true, redis=%s)",
+                        settings.redis_url.split("@")[-1] if settings.redis_url else "unset",
+                    )
+                else:
+                    logger.info(
+                        "Document indexing: in-process BackgroundTasks (INGEST_QUEUE_ENABLED=false)."
+                    )
+            else:
+                logger.info("Document indexing: synchronous (INGEST_IN_BACKGROUND=false)")
+            if settings.EMBEDDING_PROVIDER == "local":
+                logger.warning(
+                    "EMBEDDING_PROVIDER=local loads PyTorch in-process — use huggingface on Railway."
+                )
+            if settings.PRELOAD_EMBEDDING_MODEL and settings.EMBEDDING_PROVIDER == "local":
+                threading.Thread(
+                    target=lambda: __import__(
+                        "app.services.embedding_service",
+                        fromlist=["preload_embedding_model"],
+                    ).preload_embedding_model(),
+                    name="embedding-preload",
+                    daemon=True,
+                ).start()
+            app.state.ready = True
         except Exception as exc:
-            logger.error("Database migration failed: %s", exc, exc_info=exc)
-            logger.warning(
-                "Migrations failed in background; auth and persistence may fail until "
-                "`alembic upgrade head` succeeds."
-            )
+            app.state.startup_error = str(exc)
+            logger.critical("Startup failed: %s", exc, exc_info=exc)
 
-    # Do not block HTTP startup — Railway health checks time out while alembic runs.
-    threading.Thread(target=_migrate_in_background, name="db-migrate", daemon=True).start()
-
-    startup = run_startup_checks()
-    logger.info("Startup complete: %s", startup.get("status"))
+    threading.Thread(target=_startup, name="app-startup", daemon=True).start()
     logger.info(
-        "HTTP server ready — Railway PORT=%s (health: GET /health/live)",
+        "Accepting HTTP on PORT=%s — full startup continues in background (GET /health/live)",
         os.environ.get("PORT", "8000"),
     )
-    if settings.INGEST_IN_BACKGROUND:
-        if settings.ingest_uses_rq_queue:
-            logger.info(
-                "Document indexing: RQ queue (INGEST_QUEUE_ENABLED=true, redis=%s)",
-                settings.redis_url.split("@")[-1] if settings.redis_url else "unset",
-            )
-        else:
-            logger.info(
-                "Document indexing: in-process BackgroundTasks (INGEST_QUEUE_ENABLED=false). "
-                "Jobs are lost on process restart — enable Redis + RQ for production."
-            )
-    else:
-        logger.info("Document indexing: synchronous (INGEST_IN_BACKGROUND=false)")
-    if settings.EMBEDDING_PROVIDER == "local":
-        logger.warning(
-            "EMBEDDING_PROVIDER=local loads PyTorch in-process — first upload may take "
-            "1-3 min while the model loads. For faster local dev use EMBEDDING_PROVIDER=huggingface."
-        )
-    if settings.PRELOAD_EMBEDDING_MODEL and settings.EMBEDDING_PROVIDER == "local":
-        import threading
-
-        threading.Thread(
-            target=lambda: __import__(
-                "app.services.embedding_service",
-                fromlist=["preload_embedding_model"],
-            ).preload_embedding_model(),
-            name="embedding-preload",
-            daemon=True,
-        ).start()
     yield
-    logger.info("Shutting down %s", settings.APP_NAME)
+    logger.info("Shutting down %s", get_settings().APP_NAME)
 
 
 settings = get_settings()
@@ -152,6 +154,19 @@ def root():
 def health_live():
     """Instant liveness probe — no DB/Chroma/LLM calls. Use for Railway health checks."""
     return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def health_ready():
+    """Readiness — true after background startup (config validation, migrations) finishes."""
+    if getattr(app.state, "startup_error", None):
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "detail": app.state.startup_error},
+        )
+    if not getattr(app.state, "ready", False):
+        return JSONResponse(status_code=503, content={"status": "starting"})
+    return {"status": "ready"}
 
 
 @app.get("/health")

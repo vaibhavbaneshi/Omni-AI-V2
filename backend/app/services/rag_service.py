@@ -1,7 +1,5 @@
 import logging
 
-from app.core.config import settings
-from app.core.chroma_client import get_or_create_collection
 from app.services.llm_invoke import invoke_generate, invoke_stream
 from app.services.prompt_builder import build_stream_prompt
 
@@ -14,12 +12,6 @@ logger = logging.getLogger(__name__)
 from app.services.conversation_service import (
     get_chat_history
 )
-
-# -----------------------------------
-# CHROMADB
-# -----------------------------------
-
-collection = get_or_create_collection(settings.COLLECTION_NAME)
 
 # -----------------------------------
 # RETRIEVE CONTEXT

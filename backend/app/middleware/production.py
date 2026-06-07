@@ -149,7 +149,7 @@ class InMemoryRateLimitMiddleware:
             return
 
         path = scope.get("path", "")
-        if path in {"/health", "/health/live", "/", "/docs", "/openapi.json"}:
+        if path in {"/health", "/health/live", "/health/ready", "/", "/docs", "/openapi.json"}:
             await self.app(scope, receive, send)
             return
 

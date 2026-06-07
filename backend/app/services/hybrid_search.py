@@ -4,15 +4,10 @@ from app.core.app_settings import get_settings
 from app.core.chroma_client import get_or_create_collection
 from app.services.embedding_service import encode_query
 
-# -----------------------------------
-# CHROMADB
-# -----------------------------------
 
-collection = get_or_create_collection(get_settings().COLLECTION_NAME)
-
-# -----------------------------------
-# GET ALL DOCS
-# -----------------------------------
+def _collection():
+    settings = get_settings()
+    return get_or_create_collection(settings.COLLECTION_NAME)
 
 def build_filter(
     user_id=None,
@@ -63,7 +58,7 @@ def get_scoped_documents(
     )
 
     if where_filter:
-        return collection.get(
+        return _collection().get(
             where=where_filter,
             include=[
                 "documents",
@@ -156,7 +151,7 @@ def semantic_search(
     if where_filter:
         query_args["where"] = where_filter
 
-    results = collection.query(**query_args)
+    results = _collection().query(**query_args)
 
     return results["documents"][0]
 
@@ -231,7 +226,7 @@ def semantic_search_with_metadata(
     if where_filter:
         query_args["where"] = where_filter
 
-    results = collection.query(**query_args)
+    results = _collection().query(**query_args)
 
     documents_result = results.get("documents", [[]])[0]
     metadatas_result = results.get("metadatas", [[]])[0]

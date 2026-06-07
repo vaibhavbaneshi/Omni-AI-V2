@@ -8,7 +8,6 @@ from typing import Any
 from sqlalchemy import text
 
 from app.core.app_settings import get_settings
-from app.core.chroma_client import get_or_create_collection
 from app.core.llm import get_llm
 from app.db.session import SessionLocal
 
@@ -94,6 +93,8 @@ def check_chroma(*, probe: bool = True) -> dict[str, Any]:
 
     settings = get_settings()
     try:
+        from app.core.chroma_client import get_or_create_collection
+
         get_or_create_collection(settings.COLLECTION_NAME)
         return {
             "status": "ok",
