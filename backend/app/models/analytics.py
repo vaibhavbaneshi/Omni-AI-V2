@@ -33,7 +33,12 @@ class ModelUsage(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True, index=True)
+    session_id = Column(
+        Integer,
+        ForeignKey("chat_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     provider = Column(String(32), nullable=False)
     model = Column(String(128), nullable=False)
     endpoint = Column(String(128), nullable=False)
@@ -51,7 +56,12 @@ class TokenUsage(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True, index=True)
+    session_id = Column(
+        Integer,
+        ForeignKey("chat_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     model_usage_id = Column(Integer, ForeignKey("model_usage.id"), nullable=True, index=True)
     provider = Column(String(32), nullable=False)
     model = Column(String(128), nullable=False)

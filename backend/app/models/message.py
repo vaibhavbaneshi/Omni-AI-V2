@@ -23,7 +23,7 @@ class Message(Base):
 
     session_id = Column(
         Integer,
-        ForeignKey("chat_sessions.id")
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
     )
 
     user_id = Column(

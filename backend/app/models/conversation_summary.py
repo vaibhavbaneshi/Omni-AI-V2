@@ -20,7 +20,7 @@ class ConversationSummary(Base):
 
     session_id = Column(
         Integer,
-        ForeignKey("chat_sessions.id"),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
         unique=True
     )
 

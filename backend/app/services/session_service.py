@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from enum import Enum
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,6 +24,68 @@ class DeleteSessionResult(str, Enum):
     NOT_FOUND = "not_found"
     DELETED = "deleted"
     FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class _DocumentCleanupTarget:
+    document_id: int
+    user_id: int
+    filename: str
+    storage_path: str
+
+
+def _detach_analytics_session(db: Session, session_id: int) -> None:
+    """Best-effort analytics detach — must not abort the outer delete transaction."""
+    try:
+        with db.begin_nested():
+            db.query(TokenUsage).filter(TokenUsage.session_id == session_id).update(
+                {TokenUsage.session_id: None},
+                synchronize_session=False,
+            )
+            db.query(ModelUsage).filter(ModelUsage.session_id == session_id).update(
+                {ModelUsage.session_id: None},
+                synchronize_session=False,
+            )
+    except SQLAlchemyError:
+        logger.warning(
+            "Analytics detach skipped for session_id=%s (tables may be unavailable)",
+            session_id,
+            exc_info=True,
+        )
+
+
+def _cleanup_document_externals(target: _DocumentCleanupTarget) -> None:
+    """Remove stored files and vector chunks after the DB row is gone."""
+    if target.storage_path and os.path.exists(target.storage_path):
+        try:
+            os.remove(target.storage_path)
+        except OSError:
+            logger.debug(
+                "Could not remove upload file path=%s document_id=%s",
+                target.storage_path,
+                target.document_id,
+                exc_info=True,
+            )
+
+    try:
+        chroma_collection = get_document_collection()
+        matches = chroma_collection.get(
+            where={
+                "$and": [
+                    {"user_id": str(target.user_id)},
+                    {"document_id": str(target.document_id)},
+                ]
+            }
+        )
+        ids = matches.get("ids") or []
+        if ids:
+            chroma_collection.delete(ids=ids)
+    except Exception:
+        logger.debug(
+            "Chroma cleanup skipped for document_id=%s during session delete",
+            target.document_id,
+            exc_info=True,
+        )
 
 
 def delete_chat_session(
@@ -48,75 +111,49 @@ def delete_chat_session(
         )
         return DeleteSessionResult.NOT_FOUND
 
-    documents = (
-        db.query(DocumentRecord)
+    cleanup_targets = [
+        _DocumentCleanupTarget(
+            document_id=document.id,
+            user_id=document.user_id,
+            filename=document.filename,
+            storage_path=document.storage_path,
+        )
+        for document in db.query(DocumentRecord)
         .filter(DocumentRecord.session_id == session_id)
         .all()
-    )
+    ]
 
-    for document in documents:
-        if os.path.exists(document.storage_path):
-            try:
-                os.remove(document.storage_path)
-            except OSError:
-                pass
-
-        try:
-            chroma_collection = get_document_collection()
-            matches = chroma_collection.get(
-                where={
-                    "$and": [
-                        {"user_id": str(document.user_id)},
-                        {"document_id": str(document.id)},
-                    ]
-                }
-            )
-            ids = matches.get("ids") or []
-            if ids:
-                chroma_collection.delete(ids=ids)
-        except Exception:
-            logger.debug(
-                "Chroma cleanup skipped for document_id=%s during session delete",
-                document.id,
-                exc_info=True,
-            )
-
-        db.delete(document)
-
-    db.query(Message).filter(Message.session_id == session_id).delete(
-        synchronize_session=False
-    )
-
-    db.query(ConversationSummary).filter(
-        ConversationSummary.session_id == session_id
-    ).delete(synchronize_session=False)
-
-    # Analytics rows reference chat_sessions; detach instead of blocking delete.
-    db.query(TokenUsage).filter(TokenUsage.session_id == session_id).update(
-        {TokenUsage.session_id: None},
-        synchronize_session=False,
-    )
-    db.query(ModelUsage).filter(ModelUsage.session_id == session_id).update(
-        {ModelUsage.session_id: None},
-        synchronize_session=False,
-    )
-
-    db.delete(session)
     try:
+        _detach_analytics_session(db, session_id)
+
+        db.query(Message).filter(Message.session_id == session_id).delete(
+            synchronize_session=False
+        )
+        db.query(ConversationSummary).filter(
+            ConversationSummary.session_id == session_id
+        ).delete(synchronize_session=False)
+        db.query(DocumentRecord).filter(DocumentRecord.session_id == session_id).delete(
+            synchronize_session=False
+        )
+        db.delete(session)
         db.commit()
     except SQLAlchemyError:
         db.rollback()
         logger.exception(
-            "Failed to delete chat session session_id=%s user_id=%s",
+            "Failed to delete chat session session_id=%s user_id=%s documents=%s",
             session_id,
             user_id,
+            len(cleanup_targets),
         )
         return DeleteSessionResult.FAILED
+
+    for target in cleanup_targets:
+        _cleanup_document_externals(target)
 
     logger.info(
         "Chat session deleted session_id=%s user_id=%s documents=%s",
         session_id,
         user_id,
-        len(documents),
+        len(cleanup_targets),
     )
     return DeleteSessionResult.DELETED

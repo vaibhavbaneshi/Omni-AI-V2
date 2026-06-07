@@ -20,3 +20,6 @@ chroma_db/
 
 # OS
 .DS_Store
+
+.venv/
+backend/.venv/
