@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from enum import Enum
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -18,13 +19,19 @@ from app.services.documents_services import get_document_collection
 logger = logging.getLogger(__name__)
 
 
+class DeleteSessionResult(str, Enum):
+    NOT_FOUND = "not_found"
+    DELETED = "deleted"
+    FAILED = "failed"
+
+
 def delete_chat_session(
     db: Session,
     *,
     user_id: int,
     session_id: int,
-) -> bool:
-    """Delete a chat session and all owned messages, summaries, and session documents."""
+) -> DeleteSessionResult:
+    """Delete a chat session and all related messages, summaries, and documents."""
     session = (
         db.query(ChatSession)
         .filter(
@@ -34,14 +41,16 @@ def delete_chat_session(
         .first()
     )
     if not session:
-        return False
+        logger.info(
+            "Chat session delete skipped — not found session_id=%s user_id=%s",
+            session_id,
+            user_id,
+        )
+        return DeleteSessionResult.NOT_FOUND
 
     documents = (
         db.query(DocumentRecord)
-        .filter(
-            DocumentRecord.user_id == user_id,
-            DocumentRecord.session_id == session_id,
-        )
+        .filter(DocumentRecord.session_id == session_id)
         .all()
     )
 
@@ -57,7 +66,7 @@ def delete_chat_session(
             matches = chroma_collection.get(
                 where={
                     "$and": [
-                        {"user_id": str(user_id)},
+                        {"user_id": str(document.user_id)},
                         {"document_id": str(document.id)},
                     ]
                 }
@@ -66,14 +75,17 @@ def delete_chat_session(
             if ids:
                 chroma_collection.delete(ids=ids)
         except Exception:
-            pass
+            logger.debug(
+                "Chroma cleanup skipped for document_id=%s during session delete",
+                document.id,
+                exc_info=True,
+            )
 
         db.delete(document)
 
-    db.query(Message).filter(
-        Message.session_id == session_id,
-        Message.user_id == user_id,
-    ).delete(synchronize_session=False)
+    db.query(Message).filter(Message.session_id == session_id).delete(
+        synchronize_session=False
+    )
 
     db.query(ConversationSummary).filter(
         ConversationSummary.session_id == session_id
@@ -99,5 +111,12 @@ def delete_chat_session(
             session_id,
             user_id,
         )
-        return False
-    return True
+        return DeleteSessionResult.FAILED
+
+    logger.info(
+        "Chat session deleted session_id=%s user_id=%s documents=%s",
+        session_id,
+        user_id,
+        len(documents),
+    )
+    return DeleteSessionResult.DELETED

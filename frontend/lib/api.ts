@@ -356,9 +356,23 @@ export async function createCollection(name: string, token?: string | null) {
 }
 
 export type ChatSessionRecord = {
-  id: number;
+  id?: number;
+  session_id?: number;
   title: string;
 };
+
+export function normalizeChatSessionRecord(
+  record: ChatSessionRecord
+): { id: number; title: string } {
+  const id = record.id ?? record.session_id;
+  if (typeof id !== "number" || !Number.isFinite(id) || id <= 0) {
+    throw new ApiError("Invalid chat session returned by the server.", 500);
+  }
+  return {
+    id,
+    title: record.title || "New Chat",
+  };
+}
 
 export type ChatMessageRecord = {
   id: number;
@@ -369,7 +383,8 @@ export type ChatMessageRecord = {
 };
 
 export async function listChatSessions(token?: string | null) {
-  return apiRequest<ChatSessionRecord[]>("/sessions", {}, token);
+  const records = await apiRequest<ChatSessionRecord[]>("/sessions", {}, token);
+  return records.map(normalizeChatSessionRecord);
 }
 
 export async function createChatSession(
@@ -390,7 +405,7 @@ export async function createChatSession(
       method: "POST",
     },
     token
-  );
+  ).then(normalizeChatSessionRecord);
 }
 
 export async function updateChatSessionTitle(

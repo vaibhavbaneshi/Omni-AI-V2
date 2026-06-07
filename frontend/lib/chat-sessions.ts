@@ -14,3 +14,14 @@ export function isBackendSessionId(id: string | undefined | null): boolean {
 export function toBackendSessionId(id: string): number | null {
   return isBackendSessionId(id) ? Number(id) : null;
 }
+
+/** Parse API create/update payloads that may use id or session_id. */
+export function parseChatSessionId(
+  record: { id?: number; session_id?: number } | null | undefined
+): number | null {
+  const raw = record?.id ?? record?.session_id;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+    return null;
+  }
+  return raw;
+}

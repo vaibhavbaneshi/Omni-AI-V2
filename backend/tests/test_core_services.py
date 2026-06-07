@@ -8,7 +8,7 @@ from app.core.sanitize import detect_prompt_injection, sanitize_retrieved_contex
 from app.core.upload_validation import validate_document_upload
 from app.services.conversation_service import get_chat_history
 from app.services.ingestion_telemetry import IngestionContext
-from app.services.session_service import delete_chat_session
+from app.services.session_service import DeleteSessionResult, delete_chat_session
 from tests.factories import ChatSessionFactory, MessageFactory, UserFactory
 
 
@@ -76,12 +76,30 @@ def test_delete_chat_session_removes_messages(mock_get_collection, db_session):
     session = ChatSessionFactory()
     MessageFactory(session=session, role="user", content="delete me")
 
-    deleted = delete_chat_session(
+    result = delete_chat_session(
         db_session,
         user_id=session.user_id,
         session_id=session.id,
     )
-    assert deleted is True
+    assert result is DeleteSessionResult.DELETED
+    assert db_session.query(MessageFactory._meta.model).filter_by(session_id=session.id).count() == 0
+
+
+@patch("app.services.session_service.get_document_collection")
+def test_delete_chat_session_removes_messages_with_mismatched_user_id(
+    mock_get_collection, db_session
+):
+    mock_chroma = mock_get_collection.return_value
+    mock_chroma.get.return_value = {"ids": []}
+    session = ChatSessionFactory()
+    MessageFactory(session=session, role="user", content="orphan", user_id=99999)
+
+    result = delete_chat_session(
+        db_session,
+        user_id=session.user_id,
+        session_id=session.id,
+    )
+    assert result is DeleteSessionResult.DELETED
     assert db_session.query(MessageFactory._meta.model).filter_by(session_id=session.id).count() == 0
 
 
@@ -119,12 +137,12 @@ def test_delete_chat_session_detaches_analytics_usage(mock_get_collection, db_se
     db_session.add(token_usage)
     db_session.commit()
 
-    deleted = delete_chat_session(
+    result = delete_chat_session(
         db_session,
         user_id=session.user_id,
         session_id=session.id,
     )
-    assert deleted is True
+    assert result is DeleteSessionResult.DELETED
     assert db_session.query(ChatSession).filter_by(id=session.id).count() == 0
     assert db_session.query(ModelUsage).filter_by(id=model_usage.id).one().session_id is None
     assert db_session.query(TokenUsage).filter_by(id=token_usage.id).one().session_id is None

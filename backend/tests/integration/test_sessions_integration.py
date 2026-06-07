@@ -80,6 +80,7 @@ def test_delete_session_with_model_usage(auth_client, db_session):
     from app.models.analytics import ModelUsage
 
     session = ChatSessionFactory(user=auth_client.auth_user, title="Usage Chat")
+    MessageFactory(session=session, role="user", content="hello", user_id=99999)
     db_session.add(
         ModelUsage(
             user_id=auth_client.auth_user.id,

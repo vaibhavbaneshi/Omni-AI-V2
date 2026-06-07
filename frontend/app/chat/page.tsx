@@ -73,7 +73,7 @@ import { useModels } from "@/hooks/useModels";
 import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 import { getPreferredModelId, setPreferredModelId } from "@/lib/model-preferences";
 import { sanitizeChatError, sanitizeApiError } from "@/lib/user-facing-errors";
-import { isBackendSessionId } from "@/lib/chat-sessions";
+import { isBackendSessionId, toBackendSessionId } from "@/lib/chat-sessions";
 import {
   isSupportedUploadFilename,
   stripUploadExtension,
@@ -542,9 +542,10 @@ export default function ChatPage() {
   const handleDeleteChat = async (chatId: string) => {
     setSessionActionError(null);
 
-    if (isBackendSessionId(chatId)) {
+    const backendSessionId = toBackendSessionId(chatId);
+    if (backendSessionId !== null) {
       try {
-        await deleteChatSession(Number(chatId), session?.token);
+        await deleteChatSession(backendSessionId, session?.token);
       } catch (error) {
         setSessionActionError(
           sanitizeApiError(error instanceof ApiError ? error.message : undefined, {

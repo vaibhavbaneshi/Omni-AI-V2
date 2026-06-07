@@ -14,7 +14,7 @@ from app.services.title_service import (
     generate_chat_title,
     refine_chat_title,
 )
-from app.services.session_service import delete_chat_session
+from app.services.session_service import DeleteSessionResult, delete_chat_session
 
 from app.models.message import Message
 
@@ -48,6 +48,7 @@ def create_session(
     db.refresh(new_session)
 
     return {
+        "id": new_session.id,
         "session_id": new_session.id,
         "title": new_session.title
     }
@@ -151,13 +152,18 @@ def delete_session(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    deleted = delete_chat_session(
+    result = delete_chat_session(
         db,
         user_id=current_user.id,
         session_id=session_id,
     )
-    if not deleted:
+    if result is DeleteSessionResult.NOT_FOUND:
         raise HTTPException(status_code=404, detail="Session not found")
+    if result is DeleteSessionResult.FAILED:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete session. Please try again.",
+        )
     return {"message": "Session deleted", "session_id": session_id}
 
 
