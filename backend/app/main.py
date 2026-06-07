@@ -65,10 +65,19 @@ async def lifespan(app: FastAPI):
             logger.info("Startup complete: %s", startup.get("status"))
             if settings.INGEST_IN_BACKGROUND:
                 if settings.ingest_uses_rq_queue:
+                    from app.services.ingestion_queue import get_active_worker_count
+
+                    worker_count = get_active_worker_count()
                     logger.info(
-                        "Document indexing: RQ queue (INGEST_QUEUE_ENABLED=true, redis=%s)",
+                        "Document indexing: RQ queue (INGEST_QUEUE_ENABLED=true, redis=%s, workers=%s)",
                         settings.redis_url.split("@")[-1] if settings.redis_url else "unset",
+                        worker_count,
                     )
+                    if worker_count == 0:
+                        logger.error(
+                            "No RQ ingestion workers connected — uploads will stay queued. "
+                            "Ensure scripts/railway_web_and_worker.sh runs in this container."
+                        )
                 else:
                     logger.info(
                         "Document indexing: in-process BackgroundTasks (INGEST_QUEUE_ENABLED=false)."

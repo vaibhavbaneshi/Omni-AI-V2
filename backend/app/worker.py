@@ -11,6 +11,7 @@ Production (Railway / Docker):
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 import app.core.chroma_client  # noqa: F401 — silence Chroma telemetry before worker imports
@@ -33,10 +34,12 @@ def main() -> int:
     settings.validate_for_runtime()
 
     logger.info(
-        "Starting ingestion worker queues=%s,%s embedding_provider=%s",
+        "Starting ingestion worker queues=%s,%s embedding_provider=%s redis=%s pid=%s",
         INGEST_QUEUE_NAME,
         INGEST_DLQ_NAME,
         settings.EMBEDDING_PROVIDER,
+        settings.redis_url.split("@")[-1] if settings.redis_url else "unset",
+        os.getpid(),
     )
 
     conn = get_redis_connection()

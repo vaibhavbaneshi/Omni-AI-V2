@@ -219,9 +219,12 @@ async def upload_document(
     if settings.INGEST_IN_BACKGROUND:
         if ingest_queue_enabled():
             job_id = enqueue_document_ingestion(db, document.id)
+            from app.services.ingestion_queue import get_active_worker_count
+
+            worker_count = get_active_worker_count()
             logger.info(
                 "[INGEST_QUEUED] document_id=%s job_id=%s filename=%s size=%s user_id=%s session_id=%s "
-                "storage_path=%s embedding_provider=%s dispatch=rq",
+                "storage_path=%s embedding_provider=%s dispatch=rq worker_count=%s",
                 document.id,
                 job_id,
                 safe_name,
@@ -230,7 +233,24 @@ async def upload_document(
                 session_id,
                 file_path,
                 settings.EMBEDDING_PROVIDER,
+                worker_count,
             )
+            response: dict = {
+                "message": "Document uploaded. Indexing in background.",
+                "filename": safe_name,
+                "chunks_created": 0,
+                "indexing": True,
+                "collection_id": collection_record.id,
+                "document_id": document.id,
+                "job_id": job_id,
+                "worker_count": worker_count,
+            }
+            if worker_count == 0:
+                response["warning"] = (
+                    "No ingestion worker is running — indexing will stay queued until you start "
+                    "python -m app.worker in the same Railway service."
+                )
+            return response
         elif should_use_background_tasks():
             update_indexing_progress(db, document.id, stage="queued", mark_started=True)
             background_tasks.add_task(run_ingest_document_record, document.id)
@@ -414,11 +434,19 @@ def get_document_status(
     if stale_message and payload["status"] == "indexing":
         payload["stale"] = True
         payload["stale_message"] = stale_message
+        if ingest_queue_enabled():
+            from app.services.ingestion_queue import get_active_worker_count, get_ingest_job_info
+
+            payload["worker_count"] = get_active_worker_count()
+            if document.indexing_job_id:
+                payload["job"] = get_ingest_job_info(document.indexing_job_id)
         logger.warning(
-            "[INGEST_STALE] document_id=%s stage=%s elapsed=%s message=%s",
+            "[INGEST_STALE] document_id=%s job_id=%s stage=%s elapsed=%s worker_count=%s message=%s",
             document.id,
+            document.indexing_job_id,
             document.indexing_stage,
             payload.get("elapsed_seconds"),
+            payload.get("worker_count"),
             stale_message,
         )
     return payload

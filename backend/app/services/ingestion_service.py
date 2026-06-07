@@ -175,11 +175,9 @@ def detect_stale_indexing(document: DocumentRecord) -> str | None:
     elapsed = (now - started).total_seconds()
 
     if document.indexing_stage == "queued" and elapsed > QUEUED_STALE_SECONDS:
-        return (
-            f"Indexing stuck at 'queued' for {int(elapsed)}s. "
-            "The ingestion worker may not be running — start `python -m app.worker`, "
-            "verify REDIS_URL, or check queue metrics at GET /admin/ingestion-queue/metrics."
-        )
+        from app.services.ingestion_queue import build_stale_queued_message
+
+        return build_stale_queued_message(document, int(elapsed))
 
     if elapsed > MAX_INDEXING_SECONDS:
         return (

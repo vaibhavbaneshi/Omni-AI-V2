@@ -69,27 +69,13 @@ Railway runs Dockerfile start commands **without a shell** unless you wrap them.
 Do **not** use bare `cd ... &&` or `$PORT` — use `sh -c "..."` or leave empty to use the Dockerfile `CMD`.
 
 **Recommended — leave Custom Start Command empty**  
-The Dockerfile already runs:
-
-```dockerfile
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
-```
-
-(WORKDIR is `/app/backend` — no `cd` needed.)
-
-**API + RQ worker in one container** (Custom Start Command):
-
-```bash
-sh -c "python -m app.worker & exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
-```
-
-**Or use the script** (after deploy includes `backend/scripts/`):
+The Dockerfile runs API + RQ worker together (required for ingestion):
 
 ```bash
 sh /app/backend/scripts/railway_web_and_worker.sh
 ```
 
-Do **not** use a separate `ingest-worker` service on Railway unless you add shared object storage — use one service for API + worker.
+(WORKDIR is `/app/backend` — worker and API share `/data/uploads` + Chroma.)
 
 ### Environment Variables (both API + worker)
 

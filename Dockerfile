@@ -20,7 +20,6 @@ ENV ENVIRONMENT=production
 
 EXPOSE 8000
 
-# Default: API only. For API+worker set Railway Custom Start Command to:
-#   sh /app/backend/scripts/railway_start.sh
-# and env START_RQ_WORKER=true
-CMD ["sh", "-c", "echo \"Starting uvicorn on 0.0.0.0:${PORT:-8000}\" && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Default Railway deploy: API + RQ worker in one container (shared /data uploads + Chroma).
+# API-only: override Custom Start Command to uvicorn-only CMD from deployment docs.
+CMD ["sh", "/app/backend/scripts/railway_web_and_worker.sh"]

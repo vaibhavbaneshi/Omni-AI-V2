@@ -30,6 +30,76 @@ def _retry_policy() -> Retry:
     return Retry(max=settings.INGEST_JOB_MAX_RETRIES, interval=intervals)
 
 
+def get_active_worker_count() -> int:
+    """Return number of RQ workers connected to Redis, or -1 if Redis is unreachable."""
+    try:
+        from rq.worker import Worker
+
+        conn = get_redis_connection()
+        return len(Worker.all(connection=conn))
+    except Exception as exc:
+        logger.warning("[INGEST_WORKER_CHECK_FAILED] error=%s", exc)
+        return -1
+
+
+def get_ingest_job_info(job_id: str) -> dict | None:
+    """Fetch RQ job metadata for operator / stale diagnostics."""
+    try:
+        job = Job.fetch(job_id, connection=get_redis_connection())
+    except Exception:
+        return None
+    return {
+        "job_id": job.id,
+        "status": job.get_status(),
+        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "origin": job.origin,
+        "description": job.description,
+    }
+
+
+def build_stale_queued_message(document: DocumentRecord, elapsed_seconds: int) -> str:
+    """Human-readable stall reason with queue/worker context for status polling."""
+    if not ingest_queue_enabled():
+        return (
+            f"Indexing stuck at 'queued' for {elapsed_seconds}s. "
+            "The in-process background task may not have started — check API logs for [INGEST_TASK_START]."
+        )
+
+    worker_count = get_active_worker_count()
+    try:
+        metrics = get_ingestion_queue_metrics()
+    except Exception as exc:
+        metrics = {"queue_length": "?", "active_jobs": "?", "failed_jobs": "?"}
+        logger.warning("[INGEST_METRICS_FAILED] error=%s", exc)
+
+    job_info = get_ingest_job_info(document.indexing_job_id) if document.indexing_job_id else None
+
+    parts = [f"Indexing stuck at 'queued' for {elapsed_seconds}s."]
+    if worker_count == 0:
+        parts.append(
+            "No RQ ingestion workers are connected to Redis — the API enqueued the job but nothing is "
+            "processing it. On Railway, run API + worker in one service "
+            "(default Dockerfile CMD uses scripts/railway_web_and_worker.sh)."
+        )
+    elif worker_count < 0:
+        parts.append("Could not reach Redis to check workers — verify REDIS_URL.")
+    else:
+        parts.append(
+            f"{worker_count} worker(s) connected but this job has not started "
+            f"(queue_length={metrics.get('queue_length')}, active_jobs={metrics.get('active_jobs')})."
+        )
+
+    if job_info:
+        parts.append(
+            f"job_id={job_info['job_id']} job_status={job_info['status']}."
+        )
+    if metrics.get("failed_jobs"):
+        parts.append(f"failed_jobs={metrics['failed_jobs']} — check GET /admin/ingestion-queue/metrics.")
+
+    return " ".join(parts)
+
+
 def get_ingest_queue() -> Queue:
     return Queue(INGEST_QUEUE_NAME, connection=get_redis_connection())
 
@@ -117,6 +187,29 @@ def enqueue_document_ingestion(db: Session, document_id: int) -> str:
         description=f"Index document {document_id}",
     )
 
+    worker_count = get_active_worker_count()
+    if worker_count == 0:
+        logger.error(
+            "[INGEST_NO_WORKER] job_id=%s document_id=%s queue=%s — job enqueued but no RQ workers "
+            "are connected to Redis; indexing will stay queued until a worker starts",
+            job.id,
+            document_id,
+            INGEST_QUEUE_NAME,
+        )
+    elif worker_count < 0:
+        logger.warning(
+            "[INGEST_WORKER_UNKNOWN] job_id=%s document_id=%s — could not verify worker count",
+            job.id,
+            document_id,
+        )
+    else:
+        logger.info(
+            "[INGEST_WORKERS_OK] job_id=%s document_id=%s worker_count=%s",
+            job.id,
+            document_id,
+            worker_count,
+        )
+
     update_indexing_progress(
         db,
         document_id,
@@ -129,11 +222,12 @@ def enqueue_document_ingestion(db: Session, document_id: int) -> str:
         db.commit()
 
     logger.info(
-        "[INGEST_RQ_ENQUEUED] job_id=%s document_id=%s queue=%s max_retries=%s",
+        "[INGEST_RQ_ENQUEUED] job_id=%s document_id=%s queue=%s max_retries=%s worker_count=%s",
         job.id,
         document_id,
         INGEST_QUEUE_NAME,
         settings.INGEST_JOB_MAX_RETRIES,
+        worker_count,
     )
     return job.id
 
@@ -147,6 +241,7 @@ def get_ingestion_queue_metrics() -> dict:
     started = StartedJobRegistry(queue=queue)
     failed = FailedJobRegistry(queue=queue)
     finished = FinishedJobRegistry(queue=queue)
+    worker_count = get_active_worker_count()
 
     return {
         "queue_name": INGEST_QUEUE_NAME,
@@ -158,6 +253,7 @@ def get_ingestion_queue_metrics() -> dict:
         "completed_jobs": finished.count,
         "deferred_jobs": queue.deferred_job_registry.count,
         "scheduled_jobs": queue.scheduled_job_registry.count,
+        "worker_count": worker_count,
     }
 
 
