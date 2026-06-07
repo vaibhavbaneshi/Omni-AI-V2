@@ -109,6 +109,10 @@ def ingest_document_record(
             success=True,
         )
         ctx.log("INDEXING_COMPLETE", chunk_count=chunk_count)
+
+        from app.services.document_intelligence_service import schedule_document_insights_generation
+
+        schedule_document_insights_generation(document.id)
     except Exception as exc:
         db.rollback()
         filename = document.filename if document else f"document:{document_id}"

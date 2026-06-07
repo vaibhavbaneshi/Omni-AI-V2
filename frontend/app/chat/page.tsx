@@ -103,6 +103,8 @@ import {
   SelectGroup,
 } from "@/components/ui/select";
 import { MarkdownMessage } from "@/components/chat/markdown-message";
+import { DocumentInsightsPanel } from "@/components/chat/document-insights-panel";
+import { useDocumentInsights } from "@/hooks/useDocumentInsights";
 
 type Message = {
   id: string;
@@ -216,6 +218,7 @@ export default function ChatPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "up" | "down">>({});
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [insightDocumentId, setInsightDocumentId] = useState<number | null>(null);
   const {
     documents,
     readyDocuments,
@@ -232,6 +235,17 @@ export default function ChatPage() {
     upload: uploadWorkspaceDocument,
     remove: removeWorkspaceDocument,
   } = useDocuments(session?.token, activeChat?.id ?? null);
+  const insightDocument =
+    readyDocuments.find((document) => document.id === insightDocumentId) ??
+    readyDocuments[0] ??
+    null;
+  const {
+    insights: documentInsights,
+    loading: insightsLoading,
+    generating: insightsGenerating,
+    error: insightsError,
+    generate: generateDocumentInsightsForChat,
+  } = useDocumentInsights(insightDocument?.id ?? null, session?.token);
   const { memories, addMemory, removeMemory } = useMemory(session?.token);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
@@ -275,6 +289,18 @@ export default function ChatPage() {
   useEffect(() => {
     activeChatIdRef.current = activeChat?.id ?? null;
   }, [activeChat?.id]);
+
+  useEffect(() => {
+    if (!insightDocument) {
+      setInsightDocumentId(null);
+      return;
+    }
+    setInsightDocumentId((current) =>
+      current && readyDocuments.some((document) => document.id === current)
+        ? current
+        : insightDocument.id
+    );
+  }, [insightDocument, readyDocuments]);
 
   useEffect(() => {
     if (!activeChat) return;
@@ -1461,7 +1487,9 @@ export default function ChatPage() {
                     <DocumentChip
                       key={document.id}
                       document={document}
+                      active={insightDocumentId === document.id}
                       deleting={deletingDocumentId === document.id}
+                      onSelect={() => setInsightDocumentId(document.id)}
                       onDelete={() => handleDeleteDocument(document.id, document.filename)}
                     />
                   ))}
@@ -1473,6 +1501,17 @@ export default function ChatPage() {
                 </div>
               </div>
             </div>
+
+            {insightDocument && (
+              <DocumentInsightsPanel
+                document={insightDocument}
+                insights={documentInsights}
+                loading={insightsLoading}
+                generating={insightsGenerating}
+                error={insightsError}
+                onGenerate={generateDocumentInsightsForChat}
+              />
+            )}
 
             {(attachedFile || uploadMessage) && (
               <div className="mb-2 space-y-1 px-1">
@@ -1779,17 +1818,23 @@ function DocumentChip({
   document,
   deleting = false,
   indexing = false,
+  active = false,
+  onSelect,
   onDelete,
 }: {
   document: DocumentRecord;
   deleting?: boolean;
   indexing?: boolean;
+  active?: boolean;
+  onSelect?: () => void;
   onDelete?: () => void;
 }) {
   return (
     <span
       className={`group inline-flex max-w-[180px] items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] ${
-        indexing
+        active
+          ? "border-primary/40 bg-primary/10 text-primary"
+          : indexing
           ? "border-primary/20 bg-primary/5 text-primary/80"
           : "border-white/10 bg-white/[0.03] text-muted-foreground"
       }`}
@@ -1799,9 +1844,15 @@ function DocumentChip({
       ) : (
         <FileIcon className="size-3 shrink-0 text-blue-300" />
       )}
-      <span className="truncate" title={indexing ? indexingStageLabel(document) : document.filename}>
+      <button
+        type="button"
+        className="truncate text-left"
+        title={indexing ? indexingStageLabel(document) : document.filename}
+        onClick={onSelect}
+        disabled={indexing || !onSelect}
+      >
         {indexing ? indexingStageLabel(document) : document.filename}
-      </span>
+      </button>
       {!indexing && onDelete && (
         <button
           type="button"

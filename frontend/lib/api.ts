@@ -314,6 +314,71 @@ export async function deleteDocumentById(documentId: number, token?: string | nu
   );
 }
 
+export type ExecutiveSummarySection = {
+  overview: string;
+  key_findings: string[];
+  important_points: string[];
+  risks: string[];
+  recommendations: string[];
+};
+
+export type DocumentFaqItem = {
+  question: string;
+  answer: string;
+};
+
+export type DocumentActionItem = {
+  task: string;
+  deadline?: string | null;
+  owner?: string | null;
+};
+
+export type DocumentMetadataInsights = {
+  keywords: string[];
+  topics: string[];
+  entities: string[];
+  important_dates: string[];
+  statistics: string[];
+};
+
+export type DocumentInsightPayload = {
+  executive_summary: ExecutiveSummarySection;
+  faqs: DocumentFaqItem[];
+  action_items: DocumentActionItem[];
+  metadata_insights: DocumentMetadataInsights;
+};
+
+export type DocumentInsightRecord = {
+  document_id: number;
+  status: "pending" | "processing" | "ready" | "failed" | string;
+  model?: string | null;
+  error_message?: string | null;
+  payload?: DocumentInsightPayload | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export async function getDocumentInsights(documentId: number, token?: string | null) {
+  return apiRequest<DocumentInsightRecord>(`/documents/${documentId}/insights`, {}, token);
+}
+
+export async function generateDocumentInsights(
+  documentId: number,
+  token?: string | null,
+  options?: { force?: boolean }
+) {
+  const params = new URLSearchParams();
+  if (options?.force) {
+    params.set("force", "true");
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return apiRequest<{ document_id: number; status: string; message: string }>(
+    `/documents/${documentId}/insights/generate${suffix}`,
+    { method: "POST" },
+    token
+  );
+}
+
 export async function deleteDocument(
   filename: string,
   token?: string | null,

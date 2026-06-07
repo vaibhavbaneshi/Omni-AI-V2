@@ -29,6 +29,7 @@ from app.db.database import Base
 from app.db.session import get_db
 from app.models import analytics  # noqa: F401 — register analytics tables
 from app.models import user_settings  # noqa: F401 — register settings tables
+from app.models import document_insight  # noqa: F401 — register document insights
 from app.models.chat_session import ChatSession
 from app.models.conversation_summary import ConversationSummary
 from app.models.document import DocumentCollection, DocumentRecord

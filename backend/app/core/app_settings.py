@@ -129,6 +129,7 @@ class AppSettings(BaseSettings):
     ANALYTICS_ADMIN_EMAILS: str = ""
 
     ENABLE_DEEP_RESEARCH: bool = False
+    ENABLE_DOCUMENT_INTELLIGENCE: bool = False
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     GITHUB_CLIENT_ID: str = ""

@@ -29,6 +29,7 @@ from app.api.analytics_routes import router as analytics_router
 from app.api.model_routes import router as model_router
 from app.api.settings_routes import router as settings_router
 from app.api.queue_routes import router as queue_router
+from app.api.insights_routes import router as insights_router
 from app.middleware.production import (
     InMemoryRateLimitMiddleware,
     SecurityHeadersMiddleware,
@@ -202,3 +203,4 @@ app.include_router(analytics_router)
 app.include_router(model_router)
 app.include_router(settings_router)
 app.include_router(queue_router)
+app.include_router(insights_router)
