@@ -96,6 +96,8 @@ def _get_huggingface_client():
 
 def _hf_error_retryable(exc: Exception) -> bool:
     status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status in {401, 403}:
+        return False
     if status in {429, 503, 504}:
         return True
     if status is not None and status < 500:
@@ -107,6 +109,23 @@ def _hf_error_retryable(exc: Exception) -> bool:
         "ReadTimeout",
         "ConnectTimeout",
     }
+
+
+def _format_hf_embedding_error(exc: Exception) -> str:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 401 or "401 Unauthorized" in str(exc):
+        return (
+            "HuggingFace embedding authentication failed (401). "
+            "Set a valid HF_TOKEN on Railway with Inference Providers permission "
+            "(https://huggingface.co/settings/tokens). "
+            "Use only one HF_TOKEN variable — no empty duplicate entries."
+        )
+    if status == 403:
+        return (
+            "HuggingFace denied embedding access (403). "
+            "Ensure your token has Inference Providers enabled for BAAI/bge-small-en-v1.5."
+        )
+    return f"HuggingFace embedding failed: {exc}"
 
 
 def _encode_huggingface(texts: list[str], telemetry=None) -> list[list[float]]:
@@ -131,7 +150,8 @@ def _encode_huggingface(texts: list[str], telemetry=None) -> list[list[float]]:
                 break
             except Exception as exc:
                 if not _hf_error_retryable(exc):
-                    raise
+                    logger.error("[EMBEDDING_AUTH_ERROR] %s", _format_hf_embedding_error(exc))
+                    raise RuntimeError(_format_hf_embedding_error(exc)) from exc
                 last_error = exc
                 status = getattr(getattr(exc, "response", None), "status_code", None)
                 if telemetry:

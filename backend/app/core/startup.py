@@ -19,3 +19,15 @@ def log_startup_diagnostics(settings: AppSettings) -> None:
     logger.info("Embedding provider: %s (%s)", settings.EMBEDDING_PROVIDER, settings.embedding_model_label)
     logger.info("Local ML in process: %s", settings.uses_local_ml)
     logger.info("Chroma path: %s", settings.CHROMA_DB_PATH)
+    if settings.EMBEDDING_PROVIDER == "huggingface":
+        token = settings.huggingface_api_key
+        if token:
+            logger.info(
+                "HF inference token: configured (length=%d, prefix=%s)",
+                len(token),
+                token[:7] + "..." if len(token) > 10 else "(short)",
+            )
+        else:
+            logger.error(
+                "HF inference token: NOT SET — set HF_TOKEN on Railway with Inference permission"
+            )
