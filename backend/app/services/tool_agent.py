@@ -1,13 +1,17 @@
 from sqlalchemy.orm import Session
 
+from app.agent.document_analysis_agent import (
+    run_document_analysis_agent,
+    should_run_document_analysis_agent,
+)
 from app.agent.orchestrator import AgentOrchestrator
+from app.agent.research_agent import run_research_agent
 from app.core.app_settings import get_settings
 from app.services.attachment_service import (
     NO_DOCUMENT_MESSAGE,
     is_document_query,
     session_has_documents,
 )
-from app.services.research_workflow import run_deep_research
 
 
 orchestrator = AgentOrchestrator()
@@ -34,6 +38,16 @@ def _refusal_result(*, strategy: str, message: str) -> dict:
     }
 
 
+def _merge_agent_fields(result: dict) -> dict:
+    metadata = result.get("metadata") or {}
+    return {
+        **result,
+        "agent": result.get("agent") or metadata.get("agent"),
+        "report_id": result.get("report_id") or metadata.get("report_id"),
+        "document_analysis": result.get("document_analysis") or metadata.get("documents"),
+    }
+
+
 def tool_calling_agent(
     query: str,
     user_id: int,
@@ -56,19 +70,45 @@ def tool_calling_agent(
     if document_query and not has_docs:
         return _refusal_result(strategy="document-retrieval", message=NO_DOCUMENT_MESSAGE)
 
+    if settings.ENABLE_AGENT_WORKFLOWS and should_run_document_analysis_agent(
+        db,
+        query=query,
+        user_id=user_id,
+        session_id=session_id,
+        workspace_id=workspace_id,
+    ):
+        return _merge_agent_fields(
+            run_document_analysis_agent(
+                query=query,
+                user_id=user_id,
+                db=db,
+                workspace_id=workspace_id,
+                session_id=session_id,
+            )
+        )
+
     deep_research_requested = (
         mode in {"deep-research", "analyst"}
         or "deep research" in query.lower()
     )
     if settings.ENABLE_DEEP_RESEARCH and deep_research_requested and not document_query:
-        return run_deep_research(
-            query=query,
-            user_id=user_id,
-            db=db,
-            workspace_id=workspace_id,
-            collection_id=collection_id,
-            session_id=session_id,
-        )
+        try:
+            return _merge_agent_fields(
+                run_research_agent(
+                    query=query,
+                    user_id=user_id,
+                    db=db,
+                    workspace_id=workspace_id,
+                    collection_id=collection_id,
+                    session_id=session_id,
+                    history=history,
+                )
+            )
+        except Exception as exc:
+            return _refusal_result(
+                strategy="research-agent",
+                message=f"Research agent failed: {exc}",
+            )
 
     bundle = orchestrator.run(
         query=query,

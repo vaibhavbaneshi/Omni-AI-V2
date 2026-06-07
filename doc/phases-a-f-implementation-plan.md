@@ -54,44 +54,44 @@
 
 ---
 
-## Phase C — AI Agents
+## Phase C — AI Agents (COMPLETED)
 
 | Agent | Reuse | Work |
 |-------|-------|------|
-| Research | `research_workflow.py`, orchestrator | Formalize as `ResearchAgent` workflow with report artifact |
-| Document analysis | Phase A service | `DocumentAnalysisAgent` — chain: load → insights → persist (automate Phase A steps) |
+| Research | `research_workflow.py`, orchestrator | `ResearchAgent` in `agent/research_agent.py` + `research_reports` table + `POST/GET /agents/research` |
+| Document analysis | Phase A service | `DocumentAnalysisAgent` in `agent/document_analysis_agent.py` + `POST /agents/document-analysis` |
 
 ---
 
-## Phase D — Knowledge Workspace
+## Phase D — Knowledge Workspace (COMPLETED)
 
 | Item | Reuse | Work |
 |------|-------|------|
-| Folders | Client-only pins in chat | `chat_folders` table or `ChatSession.folder_id`; API + persist sidebar |
-| Collections | `DocumentCollection` | DELETE/PATCH collections, move documents, collection UI |
-| Global search | PostgreSQL full-text | `search_service.py` — messages, documents, insights; `GET /search?q=` |
+| Folders | Client-only pins in chat | `chat_folders` table + `ChatSession.folder_id` / `is_pinned` + `/folders` API |
+| Collections | `DocumentCollection` | PATCH/DELETE `/collections`, move documents, `WorkspaceCollectionsPanel` |
+| Global search | PostgreSQL/SQLite ILIKE | `search_service.py` + `GET /search?q=` + sidebar results UI |
 
 ---
 
-## Phase E — Security Completion
+## Phase E — Security Completion ✅
 
 | Item | Status | Work |
 |------|--------|------|
-| Redis rate limit | In-memory only | `RedisRateLimitMiddleware` using existing `redis_client.py` |
-| Request validation | Partial (query params) | Pydantic bodies for chat/upload |
-| Upload validation | Done | Extend tests |
-| Abuse detection | Prompt injection only | Rate-limit + audit patterns |
-| Security tests | Partial | `tests/integration/test_security_integration.py` |
+| Redis rate limit | Done | `RedisRateLimitMiddleware` + in-memory fallback via `rate_limit_service.py` |
+| Request validation | Done | `ChatStreamRequest` / `UploadFormParams` (JSON body or query/form) |
+| Upload validation | Done | Existing validation + integration tests |
+| Abuse detection | Done | `abuse_detection_service.py` — injection, spam patterns, rate-limit audit |
+| Security tests | Done | `tests/integration/test_security_integration.py` |
 
 ---
 
-## Phase F — Platform Quality
+## Phase F — Platform Quality ✅
 
-| Item | Work |
-|------|------|
-| Sentry | `sentry-sdk` in `main.py` + Next.js `instrumentation.ts` |
-| Testing 80%+ | Expand integration tests per module |
-| Docs | `doc/architecture.md`, `doc/api-reference.md`, `doc/deployment.md`, `doc/security.md`, `doc/agents.md` |
+| Item | Status | Work |
+|------|--------|------|
+| Sentry | Done | `sentry-sdk` in `main.py` + Next.js `instrumentation.ts` |
+| Testing 80%+ | Done | `test_platform_services.py`, integration suite, `pytest.ini` fail_under=80 |
+| Docs | Done | `doc/architecture.md`, `doc/api-reference.md`, `doc/deployment.md`, `doc/security.md`, `doc/agents.md` |
 
 ---
 

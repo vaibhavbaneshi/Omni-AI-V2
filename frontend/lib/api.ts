@@ -379,6 +379,49 @@ export async function generateDocumentInsights(
   );
 }
 
+export type ResearchReportRecord = {
+  id: number;
+  query: string;
+  status: string;
+  model?: string | null;
+  error_message?: string | null;
+  report?: {
+    title?: string;
+    executive_summary?: string;
+    key_findings?: string[];
+    evidence_summary?: string;
+    sources_reviewed?: string[];
+    open_questions?: string[];
+    methodology?: string;
+    iterations?: number;
+  } | null;
+  traces?: Array<Record<string, unknown>>;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export async function getResearchReport(reportId: number, token?: string | null) {
+  return apiRequest<ResearchReportRecord>(`/agents/research/${reportId}`, {}, token);
+}
+
+export async function runDocumentAnalysisAgent(
+  body: { session_id?: number; document_id?: number; force?: boolean },
+  token?: string | null
+) {
+  return apiRequest<{
+    agent: string;
+    status: string;
+    message: string;
+    documents: Array<{
+      document_id: number;
+      filename: string;
+      status: string;
+      insight_id?: number | null;
+    }>;
+    context_preview: string;
+  }>("/agents/document-analysis", { method: "POST", body: JSON.stringify(body) }, token);
+}
+
 export async function deleteDocument(
   filename: string,
   token?: string | null,
@@ -402,6 +445,7 @@ export type DocumentCollection = {
   id: number;
   name: string;
   workspace_id: string;
+  document_count?: number;
   created_at?: string | null;
 };
 
@@ -420,15 +464,117 @@ export async function createCollection(name: string, token?: string | null) {
   );
 }
 
+export async function updateCollection(
+  collectionId: number,
+  name: string,
+  token?: string | null
+) {
+  return apiRequest<DocumentCollection>(
+    `/collections/${collectionId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    },
+    token
+  );
+}
+
+export async function deleteCollection(collectionId: number, token?: string | null) {
+  return apiRequest<{ message: string; collection_id: number }>(
+    `/collections/${collectionId}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function moveDocumentToCollection(
+  documentId: number,
+  collectionId: number,
+  token?: string | null
+) {
+  return apiRequest<{ document_id: number; filename: string; collection_id: number }>(
+    `/documents/id/${documentId}/collection`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ collection_id: collectionId }),
+    },
+    token
+  );
+}
+
+export type ChatFolderRecord = {
+  id: number;
+  name: string;
+  workspace_id: string;
+  session_count?: number;
+  created_at?: string | null;
+};
+
+export async function listChatFolders(token?: string | null) {
+  return apiRequest<ChatFolderRecord[]>("/folders", {}, token);
+}
+
+export async function createChatFolder(name: string, token?: string | null) {
+  return apiRequest<ChatFolderRecord>(
+    "/folders",
+    {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    },
+    token
+  );
+}
+
+export async function deleteChatFolder(folderId: number, token?: string | null) {
+  return apiRequest<{ message: string; folder_id: number }>(
+    `/folders/${folderId}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export type WorkspaceSearchResult = {
+  type: "session" | "message" | "document" | "insight" | string;
+  id: number;
+  title: string;
+  snippet: string;
+  session_id?: number | null;
+  document_id?: number | null;
+  collection_id?: number | null;
+  updated_at?: string | null;
+};
+
+export async function searchWorkspace(query: string, token?: string | null, limit = 20) {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return apiRequest<{
+    query: string;
+    results: WorkspaceSearchResult[];
+    counts: Record<string, number>;
+  }>(`/search?${params.toString()}`, {}, token);
+}
+
 export type ChatSessionRecord = {
   id?: number;
   session_id?: number;
   title: string;
+  is_pinned?: boolean;
+  folder_id?: number | null;
+  folder_name?: string | null;
+  workspace_id?: string;
+  created_at?: string | null;
+};
+
+export type NormalizedChatSession = {
+  id: number;
+  title: string;
+  is_pinned?: boolean;
+  folder_id?: number | null;
+  folder_name?: string | null;
 };
 
 export function normalizeChatSessionRecord(
   record: ChatSessionRecord
-): { id: number; title: string } {
+): NormalizedChatSession {
   const id = record.id ?? record.session_id;
   if (typeof id !== "number" || !Number.isFinite(id) || id <= 0) {
     throw new ApiError("Invalid chat session returned by the server.", 500);
@@ -436,6 +582,9 @@ export function normalizeChatSessionRecord(
   return {
     id,
     title: record.title || "New Chat",
+    is_pinned: record.is_pinned,
+    folder_id: record.folder_id ?? null,
+    folder_name: record.folder_name ?? null,
   };
 }
 
@@ -482,6 +631,21 @@ export async function updateChatSessionTitle(
   return apiRequest<ChatSessionRecord>(
     `/sessions/${sessionId}?${params.toString()}`,
     { method: "PATCH" },
+    token
+  );
+}
+
+export async function updateSessionOrganization(
+  sessionId: number,
+  body: { is_pinned?: boolean; folder_id?: number | null; clear_folder?: boolean },
+  token?: string | null
+) {
+  return apiRequest<ChatSessionRecord>(
+    `/sessions/${sessionId}/organization`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    },
     token
   );
 }
@@ -553,6 +717,17 @@ export type StreamMeta = {
     display_name: string;
     routing_reason: string;
   };
+  agent?: string;
+  report_id?: number;
+  document_analysis?: Array<{
+    document_id: number;
+    filename: string;
+    status: string;
+    insight_id?: number | null;
+  }>;
+  retrieval_query?: string;
+  original_query?: string;
+  multi_document?: boolean;
 };
 
 export type ModelDefinition = {

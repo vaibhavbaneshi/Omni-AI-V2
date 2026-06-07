@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
+from app.schemas.chat_schemas import ChatStreamRequest, resolve_chat_stream_request
 import json
 
 from sqlalchemy.orm import Session
@@ -49,7 +50,8 @@ from app.services.title_service import refine_chat_title, should_refine_session_
 from app.services.attachment_service import is_document_query
 from app.core.security import get_current_user
 from app.core.app_settings import get_settings
-from app.core.sanitize import detect_prompt_injection, sanitize_user_query
+from app.core.sanitize import sanitize_user_query
+from app.services.abuse_detection_service import evaluate_chat_query
 from app.core.telemetry import get_trace_id, set_trace_context
 from app.core.llm import LLMProviderError
 from app.core.safe_errors import chat_facing_message
@@ -57,8 +59,6 @@ from app.services.model_router import get_provider_for_route, resolve_model_rout
 from app.models.user import User
 from app.models.chat_session import ChatSession
 from app.models.message import Message
-from app.services.security_audit_service import audit_log
-
 router = APIRouter()
 
 @router.post("/chat")
@@ -123,25 +123,25 @@ STREAM_HEADERS = {
 @router.post("/chat-stream")
 async def chat_stream(
     request: Request,
-    query: Annotated[str, Query(min_length=1, max_length=12_000)],
-    session_id: int,
-    mode: Annotated[str, Query(min_length=1, max_length=40)] = "research",
-    model: Annotated[str | None, Query(max_length=80)] = None,
-    workspace_id: Annotated[str, Query(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")] = "default",
-    collection_id: int | None = None,
+    stream_request: ChatStreamRequest = Depends(resolve_chat_stream_request),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    query = stream_request.query
+    session_id = stream_request.session_id
+    mode = stream_request.mode
+    model = stream_request.model
+    workspace_id = stream_request.workspace_id
+    collection_id = stream_request.collection_id
+
     set_trace_context(trace_id=get_trace_id(), user_id=current_user.id)
-    injection_matches = detect_prompt_injection(query)
-    if injection_matches:
-        audit_log(
-            db,
-            action="prompt_injection.detected",
-            user_id=current_user.id,
-            ip_address=request.client.host if request.client else None,
-            detail={"matches": injection_matches[:5], "surface": "chat"},
-        )
+    evaluate_chat_query(
+        query,
+        db=db,
+        user_id=current_user.id,
+        ip_address=request.client.host if request.client else None,
+        surface="chat",
+    )
     query = sanitize_user_query(query, max_length=get_settings().MAX_QUERY_CHARS)
 
     try:
@@ -259,8 +259,11 @@ async def chat_stream(
         strategy = agent_result.get("strategy", tool_used)
         route = agent_result.get("route", {})
         workspace_mode = agent_result.get("mode", mode)
-        document_summary = is_document_query(query) and bool((context or "").strip())
-        require_grounding = is_document_query(query) and not document_summary
+        document_summary = (
+            (is_document_query(query) or agent_result.get("agent") == "document-analysis")
+            and bool((context or "").strip())
+        )
+        require_grounding = is_document_query(query) and agent_result.get("agent") != "document-analysis" and not document_summary
         multi_document = bool(agent_result.get("multi_document"))
 
         yield json.dumps(
@@ -277,6 +280,9 @@ async def chat_stream(
                 "retrieval_query": agent_result.get("retrieval_query"),
                 "original_query": agent_result.get("original_query"),
                 "multi_document": multi_document,
+                "agent": agent_result.get("agent"),
+                "report_id": agent_result.get("report_id"),
+                "document_analysis": agent_result.get("document_analysis"),
                 "memory": {
                     "conversation_history": bool(history),
                     "summary": bool(summary),

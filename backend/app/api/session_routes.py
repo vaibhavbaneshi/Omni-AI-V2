@@ -6,9 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 
-from app.models.chat_session import (
-    ChatSession
-)
+from app.models.chat_folder import ChatFolder
+from app.models.chat_session import ChatSession
+from app.schemas.workspace_schemas import SessionOrganizationUpdate
+from app.services.folder_service import session_to_list_item, update_session_organization
 
 from app.services.title_service import (
     generate_chat_title,
@@ -67,11 +68,18 @@ def get_sessions(
         .all()
     )
 
+    folder_names = {
+        folder.id: folder.name
+        for folder in db.query(ChatFolder)
+        .filter(ChatFolder.user_id == current_user.id)
+        .all()
+    }
+
     return [
-        {
-            "id": session.id,
-            "title": session.title
-        }
+        session_to_list_item(
+            session,
+            folder_name=folder_names.get(session.folder_id) if session.folder_id else None,
+        )
         for session in sessions
     ]
 
@@ -144,6 +152,43 @@ def update_session(
     db.refresh(session)
 
     return {"id": session.id, "title": session.title}
+
+
+@router.patch("/sessions/{session_id}/organization")
+def update_session_organization_route(
+    session_id: int,
+    body: SessionOrganizationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        session = update_session_organization(
+            db,
+            user_id=current_user.id,
+            session_id=session_id,
+            is_pinned=body.is_pinned,
+            folder_id=body.folder_id,
+            clear_folder=body.clear_folder,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    if not session:
+        return {"error": "Session not found"}
+
+    folder_name = None
+    if session.folder_id:
+        folder = (
+            db.query(ChatFolder)
+            .filter(
+                ChatFolder.id == session.folder_id,
+                ChatFolder.user_id == current_user.id,
+            )
+            .first()
+        )
+        folder_name = folder.name if folder else None
+
+    return session_to_list_item(session, folder_name=folder_name)
 
 
 @router.delete("/sessions/{session_id}")

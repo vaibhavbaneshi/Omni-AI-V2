@@ -9,7 +9,9 @@ from fastapi import (
     File,
     HTTPException,
     Depends,
+    Query,
 )
+from pydantic import ValidationError
 
 from app.services.document_loaders import DocumentLoadError
 from app.services.documents_services import get_document_collection
@@ -32,6 +34,14 @@ from app.services.security_audit_service import audit_log
 from app.db.session import get_db
 from app.models.document import DocumentCollection, DocumentRecord
 from app.models.user import User
+from app.schemas.upload_schemas import UploadFormParams
+from app.schemas.workspace_schemas import CollectionUpdate, MoveDocumentRequest
+from app.services.collection_service import (
+    collection_document_count,
+    delete_collection,
+    move_document_to_collection,
+    update_collection_name,
+)
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -42,12 +52,25 @@ logger = logging.getLogger(__name__)
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    workspace_id: str = "default",
-    collection_id: int | None = None,
-    session_id: int | None = None,
+    workspace_id: str = Query(default="default"),
+    collection_id: int | None = Query(default=None),
+    session_id: int | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    try:
+        form_params = UploadFormParams(
+            workspace_id=workspace_id,
+            collection_id=collection_id,
+            session_id=session_id,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    workspace_id = form_params.workspace_id
+    collection_id = form_params.collection_id
+    session_id = form_params.session_id
+
     settings = get_settings()
     logger.info(
         "Upload request received filename=%s content_type=%s user_id=%s session_id=%s collection_id=%s",
@@ -546,6 +569,7 @@ def list_collections(
                 "id": collection_item.id,
                 "name": collection_item.name,
                 "workspace_id": collection_item.workspace_id,
+                "document_count": collection_document_count(db, collection_id=collection_item.id),
                 "created_at": collection_item.created_at.isoformat() if collection_item.created_at else None
             }
             for collection_item in collections
@@ -575,4 +599,80 @@ def create_collection(
         "id": collection_record.id,
         "name": collection_record.name,
         "workspace_id": collection_record.workspace_id
+    }
+
+
+@router.patch("/collections/{collection_id}")
+def patch_collection(
+    collection_id: int,
+    body: CollectionUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        collection = update_collection_name(
+            db,
+            user_id=current_user.id,
+            collection_id=collection_id,
+            name=body.name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found.")
+
+    return {
+        "id": collection.id,
+        "name": collection.name,
+        "workspace_id": collection.workspace_id,
+        "document_count": collection_document_count(db, collection_id=collection.id),
+    }
+
+
+@router.delete("/collections/{collection_id}")
+def remove_collection(
+    collection_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        deleted = delete_collection(
+            db,
+            user_id=current_user.id,
+            collection_id=collection_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Collection not found.")
+
+    return {"message": "Collection deleted", "collection_id": collection_id}
+
+
+@router.patch("/documents/id/{document_id}/collection")
+def move_document_collection(
+    document_id: int,
+    body: MoveDocumentRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        document = move_document_to_collection(
+            db,
+            user_id=current_user.id,
+            document_id=document_id,
+            collection_id=body.collection_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    return {
+        "document_id": document.id,
+        "filename": document.filename,
+        "collection_id": document.collection_id,
     }

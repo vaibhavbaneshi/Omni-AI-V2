@@ -108,6 +108,7 @@ class AppSettings(BaseSettings):
 
     MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024
     RATE_LIMIT_PER_MINUTE: int = 120
+    ENABLE_REDIS_RATE_LIMIT: bool = True
     MAX_QUERY_CHARS: int = 12_000
 
     # Conversation memory windowing (Phase 3).
@@ -122,6 +123,11 @@ class AppSettings(BaseSettings):
     # Persist API/model/token metrics to PostgreSQL (Phase 1 observability).
     ENABLE_USAGE_TRACKING: bool = True
 
+    # Phase F — optional Sentry error tracking (set SENTRY_DSN to enable).
+    SENTRY_DSN: str = ""
+    SENTRY_RELEASE: str = ""
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+
     # Phase 4 — comma-separated admin emails allowed to POST /evaluation/run in production.
     EVAL_ADMIN_EMAILS: str = ""
 
@@ -129,6 +135,7 @@ class AppSettings(BaseSettings):
     ANALYTICS_ADMIN_EMAILS: str = ""
 
     ENABLE_DEEP_RESEARCH: bool = False
+    ENABLE_AGENT_WORKFLOWS: bool = True
     ENABLE_DOCUMENT_INTELLIGENCE: bool = False
     # Phase B — rewrite follow-up queries before retrieval.
     ENABLE_QUERY_REWRITING: bool = True
@@ -206,6 +213,14 @@ class AppSettings(BaseSettings):
     @property
     def ingest_uses_rq_queue(self) -> bool:
         return self.INGEST_QUEUE_ENABLED and bool(self.redis_url)
+
+    @property
+    def use_redis_rate_limit(self) -> bool:
+        return self.ENABLE_REDIS_RATE_LIMIT and bool(self.redis_url)
+
+    @property
+    def sentry_environment(self) -> str:
+        return self.ENVIRONMENT
 
     @property
     def cors_origin_list(self) -> list[str]:

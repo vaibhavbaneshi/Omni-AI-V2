@@ -7,6 +7,8 @@ from collections.abc import Generator
 from unittest.mock import patch
 
 import pytest
+
+pytest_plugins = ("pytest_asyncio",)
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -22,6 +24,7 @@ os.environ.setdefault("INGEST_IN_BACKGROUND", "false")
 os.environ.setdefault("INGEST_QUEUE_ENABLED", "false")
 os.environ.setdefault("PRELOAD_EMBEDDING_MODEL", "false")
 os.environ.setdefault("ENABLE_RERANKER", "false")
+os.environ.setdefault("ENABLE_REDIS_RATE_LIMIT", "false")
 os.environ.setdefault("EMBEDDING_PROVIDER", "openai")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 
@@ -30,6 +33,8 @@ from app.db.session import get_db
 from app.models import analytics  # noqa: F401 — register analytics tables
 from app.models import user_settings  # noqa: F401 — register settings tables
 from app.models import document_insight  # noqa: F401 — register document insights
+from app.models import research_report  # noqa: F401 — register research reports
+from app.models import chat_folder  # noqa: F401 — register chat folders
 from app.models.chat_session import ChatSession
 from app.models.conversation_summary import ConversationSummary
 from app.models.document import DocumentCollection, DocumentRecord
@@ -37,6 +42,7 @@ from app.models.memory import UserMemory
 from app.models.message import Message
 from app.models.user import User
 from app.services.auth_service import create_access_token
+from app.services.rate_limit_service import RateLimitRule
 from app.services.settings_service import ensure_user_settings, register_user_session
 from tests.factories import UserFactory, bind_factories
 
@@ -86,6 +92,10 @@ def auth_context(db_session):
     return {"user": user, "token": token, "headers": headers}
 
 
+def _permissive_rate_limit_rule(path: str, *, default_limit: int = 120) -> RateLimitRule:
+    return RateLimitRule(limit=100_000, window_seconds=60, scope="test")
+
+
 @pytest.fixture
 def client(db_session) -> Generator[TestClient, None, None]:
     def override_get_db():
@@ -96,12 +106,13 @@ def client(db_session) -> Generator[TestClient, None, None]:
 
     with patch("app.core.health.run_startup_checks", return_value={"status": "started"}):
         with patch("app.db.migrations.run_migrations"):
-            from app.main import app
+            with patch("app.middleware.production.rule_for_path", side_effect=_permissive_rate_limit_rule):
+                from app.main import app
 
-            app.dependency_overrides[get_db] = override_get_db
-            with TestClient(app) as test_client:
-                yield test_client
-            app.dependency_overrides.clear()
+                app.dependency_overrides[get_db] = override_get_db
+                with TestClient(app) as test_client:
+                    yield test_client
+                app.dependency_overrides.clear()
 
 
 @pytest.fixture

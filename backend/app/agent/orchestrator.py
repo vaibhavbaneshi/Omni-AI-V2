@@ -13,6 +13,7 @@ from app.services.attachment_service import (
     session_has_documents,
 )
 from app.services.multi_document_service import is_multi_document_query
+from app.agent.document_analysis_agent import is_document_analysis_request
 from app.tools.calculator import calculator_tool
 from app.tools.memory import memory_tool
 from app.tools.retrieval import retrieval_tool
@@ -75,6 +76,26 @@ class AgentOrchestrator:
             if db is not None and user_id is not None
             else False
         )
+
+        if (
+            db is not None
+            and user_id is not None
+            and session_id is not None
+            and is_document_analysis_request(query)
+            and session_has_documents(
+                db,
+                user_id=user_id,
+                session_id=session_id,
+                workspace_id=workspace_id,
+            )
+        ):
+            return AgentRoute(
+                strategy="document-analysis-agent",
+                tools=["retrieval"],
+                reason="The request asks for persisted document intelligence artifacts.",
+                confidence=0.96,
+                mode=mode,
+            )
 
         if document_query:
             return AgentRoute(

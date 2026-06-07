@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -37,6 +38,20 @@ class ChatSession(Base):
         nullable=False,
         default="default",
         index=True
+    )
+
+    is_pinned = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+    )
+
+    folder_id = Column(
+        Integer,
+        ForeignKey("chat_folders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     created_at = Column(

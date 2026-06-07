@@ -8,6 +8,10 @@ import os
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 os.environ.setdefault("CHROMA_TELEMETRY", "FALSE")
 
+from app.core.sentry_config import init_sentry
+
+init_sentry()
+
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -30,8 +34,12 @@ from app.api.model_routes import router as model_router
 from app.api.settings_routes import router as settings_router
 from app.api.queue_routes import router as queue_router
 from app.api.insights_routes import router as insights_router
+from app.api import agent_routes
+from app.api.folder_routes import router as folder_router
+from app.api.search_routes import router as search_router
 from app.middleware.production import (
     InMemoryRateLimitMiddleware,
+    RedisRateLimitMiddleware,
     SecurityHeadersMiddleware,
     TraceMiddleware,
 )
@@ -128,10 +136,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(
-    InMemoryRateLimitMiddleware,
-    requests_per_minute=settings.RATE_LIMIT_PER_MINUTE,
+_rate_limit_cls = (
+    RedisRateLimitMiddleware if settings.use_redis_rate_limit else InMemoryRateLimitMiddleware
 )
+if settings.use_redis_rate_limit:
+    logger.info("Rate limiting: Redis-backed (multi-worker safe)")
+else:
+    logger.info("Rate limiting: in-memory (single-process)")
+app.add_middleware(_rate_limit_cls, requests_per_minute=settings.RATE_LIMIT_PER_MINUTE)
 app.add_middleware(TraceMiddleware)
 
 AVATAR_DIR = Path(__file__).resolve().parent.parent / "uploads" / "avatars"
@@ -204,3 +216,6 @@ app.include_router(model_router)
 app.include_router(settings_router)
 app.include_router(queue_router)
 app.include_router(insights_router)
+app.include_router(agent_routes.router)
+app.include_router(folder_router)
+app.include_router(search_router)

@@ -92,6 +92,7 @@ def test_active_worker_count(mock_redis, mock_worker, monkeypatch):
 @patch("app.services.ingestion_queue.get_active_worker_count")
 def test_build_stale_queued_message_no_workers(mock_workers, mock_metrics, mock_job, monkeypatch):
     monkeypatch.setenv("INGEST_QUEUE_ENABLED", "true")
+    monkeypatch.setenv("INGEST_IN_BACKGROUND", "true")
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     get_settings.cache_clear()
 
@@ -112,7 +113,7 @@ def test_build_stale_queued_message_no_workers(mock_workers, mock_metrics, mock_
     )
     message = build_stale_queued_message(document, 120)
     assert "120s" in message
-    assert "No RQ ingestion workers" in message
+    assert "No RQ workers connected" in message
     assert "job_status=queued" in message
 
 

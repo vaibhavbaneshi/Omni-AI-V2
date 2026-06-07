@@ -36,3 +36,11 @@ def reset_redis_connection() -> None:
         except Exception:
             pass
     _connection = None
+
+
+def try_get_redis_connection() -> redis.Redis | None:
+    """Return Redis client when configured; None if unavailable."""
+    try:
+        return get_redis_connection()
+    except Exception:
+        return None

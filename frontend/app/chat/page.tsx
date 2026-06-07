@@ -58,12 +58,18 @@ import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
 import {
   ApiError,
   createChatSession,
+  createChatFolder,
   deleteChatSession,
   getChatSessionMessages,
+  listChatFolders,
   listChatSessions,
   logoutSession,
+  searchWorkspace,
   updateChatSessionTitle,
+  updateSessionOrganization,
+  type ChatFolderRecord,
   type DocumentRecord,
+  type WorkspaceSearchResult,
   indexingStageLabel,
   type StreamMeta,
   type StreamSource,
@@ -104,6 +110,8 @@ import {
 } from "@/components/ui/select";
 import { MarkdownMessage } from "@/components/chat/markdown-message";
 import { DocumentInsightsPanel } from "@/components/chat/document-insights-panel";
+import { WorkspaceCollectionsPanel } from "@/components/chat/workspace-collections-panel";
+import { WorkspaceSearchResults } from "@/components/chat/workspace-search-results";
 import { useDocumentInsights } from "@/hooks/useDocumentInsights";
 
 type Message = {
@@ -129,6 +137,7 @@ type Chat = {
   messages: Message[];
   pinned?: boolean;
   folder?: string;
+  folderId?: number | null;
 };
 
 const workspaceModes = [
@@ -209,6 +218,9 @@ export default function ChatPage() {
     cancel: cancelChatStream,
   } = useChatStream();
   const [searchQuery, setSearchQuery] = useState("");
+  const [chatFolders, setChatFolders] = useState<ChatFolderRecord[]>([]);
+  const [workspaceResults, setWorkspaceResults] = useState<WorkspaceSearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [sessionActionError, setSessionActionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -250,7 +262,7 @@ export default function ChatPage() {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [expandedFolders, setExpandedFolders] = useState<string[]>(["Work"]);
+  const [expandedFolders, setExpandedFolders] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -338,16 +350,31 @@ export default function ChatPage() {
     const urlChatId = readUrlChatId();
 
     listChatSessions(session.token)
-      .then((records) => {
+      .then(async (records) => {
+        let folders: ChatFolderRecord[] = [];
+        try {
+          folders = await listChatFolders(session.token);
+        } catch {
+          folders = [];
+        }
+        setChatFolders(folders);
+
         const nextChats: Chat[] = records.map((record) => ({
           id: String(record.id),
           title: record.title,
           lastMessage: "",
           timestamp: new Date(),
           messages: [],
+          pinned: Boolean(record.is_pinned),
+          folder: record.folder_name || undefined,
+          folderId: record.folder_id ?? undefined,
         }));
 
         setChats(nextChats);
+        setExpandedFolders((current) => {
+          const names = [...new Set(nextChats.map((chat) => chat.folder).filter(Boolean) as string[])];
+          return names.length > 0 ? Array.from(new Set([...current, ...names])) : current;
+        });
 
         if (nextChats.length === 0) {
           setActiveChat(null);
@@ -369,6 +396,47 @@ export default function ChatPage() {
       .catch(() => undefined)
       .finally(() => setSessionsLoaded(true));
   }, [authenticated, session?.token]);
+
+  useEffect(() => {
+    if (!session?.token || searchQuery.trim().length < 2) {
+      setWorkspaceResults([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    const timer = window.setTimeout(() => {
+      searchWorkspace(searchQuery.trim(), session.token, 12)
+        .then((response) => setWorkspaceResults(response.results))
+        .catch(() => setWorkspaceResults([]))
+        .finally(() => setSearchLoading(false));
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [searchQuery, session?.token]);
+
+  const handleWorkspaceSearchSelect = (result: WorkspaceSearchResult) => {
+    if (result.type === "session" || result.session_id) {
+      const targetId = String(result.session_id ?? result.id);
+      const match = chats.find((chat) => chat.id === targetId);
+      if (match) {
+        selectChat(match);
+        setSearchQuery("");
+        setWorkspaceResults([]);
+      }
+      return;
+    }
+
+    if (result.type === "document" && result.document_id) {
+      setInsightDocumentId(result.document_id);
+      if (result.session_id) {
+        const match = chats.find((chat) => chat.id === String(result.session_id));
+        if (match) selectChat(match);
+      }
+      setSearchQuery("");
+      setWorkspaceResults([]);
+    }
+  };
 
   useEffect(() => {
     const chatId = activeChat?.id;
@@ -552,17 +620,58 @@ export default function ChatPage() {
     }
   };
 
-  const handleTogglePin = (chatId: string) => {
-    const update = (item: Chat) => (item.id === chatId ? { ...item, pinned: !item.pinned } : item);
+  const handleTogglePin = async (chatId: string) => {
+    const chat = chats.find((item) => item.id === chatId);
+    const nextPinned = !chat?.pinned;
+    const update = (item: Chat) => (item.id === chatId ? { ...item, pinned: nextPinned } : item);
     setChats((prev) => prev.map(update));
     setActiveChat((prev) => (prev?.id === chatId ? update(prev) : prev));
+
+    if (isBackendSessionId(chatId)) {
+      try {
+        await updateSessionOrganization(Number(chatId), { is_pinned: nextPinned }, session?.token);
+      } catch {
+        // keep optimistic state
+      }
+    }
   };
 
-  const handleMoveToWork = (chatId: string) => {
+  const handleMoveToWork = async (chatId: string) => {
+    const chat = chats.find((item) => item.id === chatId);
+    const movingToWork = chat?.folder !== "Work";
+
+    let workFolder = chatFolders.find((folder) => folder.name === "Work");
+    if (movingToWork && !workFolder && session?.token) {
+      try {
+        workFolder = await createChatFolder("Work", session.token);
+        setChatFolders((prev) => [...prev, workFolder!]);
+      } catch {
+        return;
+      }
+    }
+
     const update = (item: Chat) =>
-      item.id === chatId ? { ...item, folder: item.folder === "Work" ? undefined : "Work" } : item;
+      item.id === chatId
+        ? {
+            ...item,
+            folder: movingToWork ? "Work" : undefined,
+            folderId: movingToWork ? workFolder?.id : undefined,
+          }
+        : item;
     setChats((prev) => prev.map(update));
     setActiveChat((prev) => (prev?.id === chatId ? update(prev) : prev));
+
+    if (isBackendSessionId(chatId)) {
+      try {
+        await updateSessionOrganization(
+          Number(chatId),
+          movingToWork ? { folder_id: workFolder?.id ?? undefined } : { clear_folder: true },
+          session?.token
+        );
+      } catch {
+        // keep optimistic state
+      }
+    }
   };
 
   const handleDeleteChat = async (chatId: string) => {
@@ -896,6 +1005,12 @@ export default function ChatPage() {
                     <Command className="size-3" />K
                   </div>
                 </div>
+                <WorkspaceSearchResults
+                  query={searchQuery}
+                  results={workspaceResults}
+                  loading={searchLoading}
+                  onSelect={handleWorkspaceSearchSelect}
+                />
                 {sessionActionError && (
                   <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive">
                     <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
@@ -1502,6 +1617,15 @@ export default function ChatPage() {
               </div>
             </div>
 
+            <WorkspaceCollectionsPanel
+              token={session?.token}
+              collections={collections}
+              activeCollectionId={activeCollectionId}
+              documents={documents}
+              onRefresh={refreshDocuments}
+              onSelectCollection={setActiveCollectionId}
+            />
+
             {insightDocument && (
               <DocumentInsightsPanel
                 document={insightDocument}
@@ -1639,6 +1763,21 @@ function ToolVisibility({
         <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
           <Search className="size-3.5 text-cyan-300" />
           <span>Search {meta.route.status}</span>
+        </div>
+      )}
+      {meta?.agent === "research" && meta?.report_id && (
+        <div className="flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-3 py-1.5 text-[11px] font-medium text-violet-200 shadow-inner">
+          <FlaskConical className="size-3.5" />
+          <span>Research report #{meta.report_id}</span>
+        </div>
+      )}
+      {meta?.agent === "document-analysis" && (
+        <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-200 shadow-inner">
+          <FileText className="size-3.5" />
+          <span>
+            Document analysis
+            {meta.document_analysis?.length ? ` (${meta.document_analysis.length})` : ""}
+          </span>
         </div>
       )}
       {meta?.mode && (

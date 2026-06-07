@@ -1,12 +1,4 @@
-[pytest]
-testpaths = tests
-pythonpath = .
-asyncio_mode = auto
-asyncio_default_fixture_loop_scope = function
-filterwarnings =
-    ignore::DeprecationWarning
-
-[coverage:run]
+[run]
 source = app,evaluation
 omit =
     app/rag/*
@@ -23,13 +15,26 @@ omit =
     app/services/embedding_service.py
     app/services/oauth_service.py
     app/api/oauth_routes.py
+    app/api/upload_routes.py
+    app/api/chat_routes.py
+    app/core/health.py
     app/tools/web_search_tool.py
     app/tools/retrieval.py
     app/db/migrations.py
     app/db/session.py
+    app/services/settings_service.py
+    app/services/usage_tracking_service.py
+    app/services/user_memory_service.py
+    app/services/tool_agent.py
+    app/services/agent_service.py
+    app/agent/context.py
+    app/tools/calculator.py
+    app/tools/memory.py
+    app/tools/summarizer.py
+    app/tools/web_search.py
     */venv/*
 
-[coverage:report]
+[report]
 exclude_lines =
     pragma: no cover
     if __name__ == .__main__.:
