@@ -4,6 +4,8 @@ from app.core.app_settings import get_settings
 from app.core.chroma_client import get_or_create_collection
 from app.services.embedding_service import encode_query
 
+_RRF_K = 60
+
 
 def _collection():
     settings = get_settings()
@@ -72,7 +74,7 @@ def get_scoped_documents(
 # BM25 SEARCH
 # -----------------------------------
 
-def bm25_search(
+def bm25_search_ranked(
     query,
     top_k=3,
     user_id=None,
@@ -80,7 +82,6 @@ def bm25_search(
     collection_id=None,
     session_id=None,
 ):
-
     scoped = get_scoped_documents(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -92,32 +93,30 @@ def bm25_search(
     if not documents:
         return []
 
-    bm25 = BM25Okapi(
-        [
-            doc.split()
-            for doc in documents
-        ]
-    )
-
-    if not bm25:
-        return []
-
+    bm25 = BM25Okapi([doc.split() for doc in documents])
     tokenized_query = query.split()
+    scores = bm25.get_scores(tokenized_query)
 
-    scores = bm25.get_scores(
-        tokenized_query
-    )
+    ranked = sorted(zip(documents, scores), key=lambda item: item[1], reverse=True)
+    return ranked[:top_k]
 
-    ranked = sorted(
-        zip(documents, scores),
-        key=lambda x: x[1],
-        reverse=True
-    )
 
-    return [
-        doc[0]
-        for doc in ranked[:top_k]
-    ]
+def bm25_search(
+    query,
+    top_k=3,
+    user_id=None,
+    workspace_id="default",
+    collection_id=None,
+    session_id=None,
+):
+    return [doc for doc, _ in bm25_search_ranked(
+        query,
+        top_k=top_k,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id,
+        session_id=session_id,
+    )]
 
 # -----------------------------------
 # SEMANTIC SEARCH
@@ -159,6 +158,52 @@ def semantic_search(
 # HYBRID SEARCH
 # -----------------------------------
 
+def hybrid_search_ranked(
+    query,
+    top_k=5,
+    user_id=None,
+    workspace_id="default",
+    collection_id=None,
+    session_id=None,
+):
+    """Merge semantic and BM25 rankings with weighted reciprocal rank fusion."""
+    settings = get_settings()
+    semantic_weight = settings.HYBRID_SEMANTIC_WEIGHT
+    bm25_weight = settings.HYBRID_BM25_WEIGHT
+
+    semantic_results = semantic_search(
+        query,
+        top_k=max(top_k, 10),
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id,
+        session_id=session_id,
+    )
+    bm25_results = bm25_search_ranked(
+        query,
+        top_k=max(top_k, 10),
+        user_id=user_id,
+        workspace_id=workspace_id,
+        collection_id=collection_id,
+        session_id=session_id,
+    )
+
+    fused_scores: dict[str, float] = {}
+
+    for rank, document in enumerate(semantic_results):
+        fused_scores[document] = fused_scores.get(document, 0.0) + (
+            semantic_weight / (_RRF_K + rank + 1)
+        )
+
+    for rank, (document, _score) in enumerate(bm25_results):
+        fused_scores[document] = fused_scores.get(document, 0.0) + (
+            bm25_weight / (_RRF_K + rank + 1)
+        )
+
+    ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
+    return [(document, round(score, 6)) for document, score in ranked[:top_k]]
+
+
 def hybrid_search(
     query,
     top_k=5,
@@ -167,30 +212,14 @@ def hybrid_search(
     collection_id=None,
     session_id=None,
 ):
-
-    semantic_results = semantic_search(
+    return [document for document, _ in hybrid_search_ranked(
         query,
+        top_k=top_k,
         user_id=user_id,
         workspace_id=workspace_id,
         collection_id=collection_id,
         session_id=session_id,
-    )
-
-    bm25_results = bm25_search(
-        query,
-        user_id=user_id,
-        workspace_id=workspace_id,
-        collection_id=collection_id,
-        session_id=session_id,
-    )
-
-    combined = list(
-        dict.fromkeys(
-            semantic_results + bm25_results
-        )
-    )
-
-    return combined[:top_k]
+    )]
 
 
 def semantic_search_with_metadata(

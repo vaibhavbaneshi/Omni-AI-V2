@@ -44,13 +44,13 @@
 
 ---
 
-## Phase B — Advanced RAG
+## Phase B — Advanced RAG (COMPLETED)
 
 | Item | Reuse | Work |
 |------|-------|------|
-| Query rewriting | `conversation_service`, `llm_invoke` | New `query_contextualizer_service.py`; call before `retrieve_context` in `chat_routes` |
-| Hybrid retrieval | `hybrid_search.py` exists | Tune weights, add benchmark hook in `evaluation/runner.py` |
-| Multi-doc analysis | Session-scoped retrieval | `multi_document_service.py` — group sources by `document_id`, comparison prompt in `prompt_builder` |
+| Query rewriting | `conversation_service`, `llm_invoke` | `query_contextualizer_service.py`; wired in `retrieval_tool` / `rag_service` |
+| Hybrid retrieval | `hybrid_search.py` | Weighted RRF merge + `benchmark_hybrid_retrieval` in `evaluation/runner.py` |
+| Multi-doc analysis | Session-scoped retrieval | `multi_document_service.py` — group by `document_id`, comparison prompts |
 
 ---
 

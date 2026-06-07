@@ -103,4 +103,7 @@ def tool_calling_agent(
         "tools": meta["tools"],
         "traces": meta["traces"],
         "metadata": meta["metadata"],
+        "retrieval_query": meta["metadata"].get("retrieval_query"),
+        "original_query": meta["metadata"].get("original_query"),
+        "multi_document": meta["metadata"].get("multi_document", False),
     }

@@ -77,7 +77,7 @@ def test_build_stream_prompt_uses_comparison_format():
         mode="research",
     )
 
-    assert "ANSWER FORMAT (mandatory for comparison requests)" in prompt
+    assert "ANSWER FORMAT (mandatory for multi-document comparison)" in prompt
     assert "## Feature Comparison" in prompt
     assert "Markdown table" in prompt
     assert "## Recommendations" in prompt

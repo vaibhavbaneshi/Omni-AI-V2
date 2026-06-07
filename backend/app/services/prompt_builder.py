@@ -24,6 +24,7 @@ def _answer_format_instructions(
     effective_mode: str,
     *,
     document_summary: bool = False,
+    multi_document: bool = False,
 ) -> str:
     query = query or ""
 
@@ -53,22 +54,23 @@ Expanded explanation with short paragraphs and bullets where helpful.
 - Action 2
 """
 
-    if _COMPARISON_HINTS.search(query):
+    if multi_document or _COMPARISON_HINTS.search(query):
         return """
-ANSWER FORMAT (mandatory for comparison requests):
+ANSWER FORMAT (mandatory for multi-document comparison):
 # Summary
-Brief direct answer in 1-3 sentences.
+Brief direct answer comparing the uploaded documents in 1-3 sentences.
 
 ## Key Points
-- Most important difference 1
-- Most important difference 2
-- Most important difference 3
+- Most important difference or similarity 1
+- Most important difference or similarity 2
+- Most important difference or similarity 3
 
 ## Feature Comparison
-Use a Markdown table when there are clear dimensions to compare.
+Use a Markdown table with one row per document or dimension when comparing uploaded files.
+Clearly label which document each column or row refers to.
 
 ## Details
-Expanded comparison with concise paragraphs.
+Expanded comparison with concise paragraphs grouped by document when helpful.
 
 ## Recommendations
 - Best option and when to choose it
@@ -176,6 +178,7 @@ def build_stream_prompt(
     mode: str = "research",
     require_grounding: bool = False,
     document_summary: bool = False,
+    multi_document: bool = False,
 ) -> str:
     effective_mode = "coding" if looks_like_coding_request(query, mode) else mode
 
@@ -208,6 +211,7 @@ Use structured bullets when comparing options. Stay concise and readable.
         query,
         effective_mode,
         document_summary=document_summary,
+        multi_document=multi_document,
     )
 
     blocks: list[str] = []
@@ -228,6 +232,8 @@ Use structured bullets when comparing options. Stay concise and readable.
         label = (
             "Uploaded document content for this chat — summarize and answer from this text only"
             if document_summary
+            else "Reference material from multiple uploaded documents — compare using these sections"
+            if multi_document
             else "Reference material — use when relevant; do not invent facts beyond this"
         )
         blocks.append(

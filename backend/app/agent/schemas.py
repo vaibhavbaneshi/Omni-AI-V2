@@ -102,6 +102,29 @@ class ContextBundle:
 
     def to_meta(self):
         source_dicts = [source.to_dict() for source in self.sources]
+        documents = [source for source in source_dicts if source.get("type") == "document"]
+        documents_by_id: dict[str, list[dict]] = {}
+        for source in documents:
+            metadata = source.get("metadata") or {}
+            document_id = str(metadata.get("document_id") or source.get("source") or "unknown")
+            documents_by_id.setdefault(document_id, []).append(source)
+
+        retrieval_meta = {}
+        for result in self.tool_results:
+            if result.name != "retrieval":
+                continue
+            retrieval_meta = {
+                key: result.metadata.get(key)
+                for key in (
+                    "retrieval_query",
+                    "original_query",
+                    "multi_document",
+                    "document_groups",
+                    "strategy",
+                )
+                if result.metadata.get(key) is not None
+            }
+            break
 
         return {
             "tool": self.route.strategy,
@@ -110,11 +133,8 @@ class ContextBundle:
             "route": self.route.to_dict(),
             "sources": source_dicts,
             "source_groups": {
-                "documents": [
-                    source
-                    for source in source_dicts
-                    if source.get("type") == "document"
-                ],
+                "documents": documents,
+                "documents_by_id": documents_by_id,
                 "web": [
                     source
                     for source in source_dicts
@@ -134,7 +154,10 @@ class ContextBundle:
                 trace.to_dict()
                 for trace in self.traces
             ],
-            "metadata": self.metadata
+            "metadata": {
+                **self.metadata,
+                **retrieval_meta,
+            }
         }
 
 

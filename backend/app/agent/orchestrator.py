@@ -7,10 +7,12 @@ from app.agent.context import ContextAggregator
 from app.agent.schemas import AgentRoute, ContextBundle, TraceEvent
 from app.agent.tools import ToolRegistry
 from app.services.attachment_service import (
+    count_session_documents,
     is_document_query,
     needs_calculator,
     session_has_documents,
 )
+from app.services.multi_document_service import is_multi_document_query
 from app.tools.calculator import calculator_tool
 from app.tools.memory import memory_tool
 from app.tools.retrieval import retrieval_tool
@@ -80,6 +82,26 @@ class AgentOrchestrator:
                 tools=["retrieval", "memory"],
                 reason="The request references an uploaded document; retrieval is required.",
                 confidence=0.97,
+                mode=mode,
+            )
+
+        if (
+            db is not None
+            and user_id is not None
+            and session_id is not None
+            and is_multi_document_query(query)
+            and count_session_documents(
+                db,
+                user_id=user_id,
+                session_id=session_id,
+                workspace_id=workspace_id,
+            ) >= 2
+        ):
+            return AgentRoute(
+                strategy="multi-document-analysis",
+                tools=["retrieval", "memory"],
+                reason="The request compares or contrasts multiple uploaded documents.",
+                confidence=0.94,
                 mode=mode,
             )
 

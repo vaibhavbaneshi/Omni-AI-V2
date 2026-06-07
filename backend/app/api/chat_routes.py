@@ -261,6 +261,7 @@ async def chat_stream(
         workspace_mode = agent_result.get("mode", mode)
         document_summary = is_document_query(query) and bool((context or "").strip())
         require_grounding = is_document_query(query) and not document_summary
+        multi_document = bool(agent_result.get("multi_document"))
 
         yield json.dumps(
             {
@@ -273,6 +274,9 @@ async def chat_stream(
                 "source_groups": agent_result.get("source_groups", {}),
                 "tools": agent_result.get("tools", []),
                 "traces": agent_result.get("traces", []),
+                "retrieval_query": agent_result.get("retrieval_query"),
+                "original_query": agent_result.get("original_query"),
+                "multi_document": multi_document,
                 "memory": {
                     "conversation_history": bool(history),
                     "summary": bool(summary),
@@ -308,6 +312,7 @@ async def chat_stream(
                 route=route,
                 require_grounding=require_grounding,
                 document_summary=document_summary,
+                multi_document=multi_document,
                 user_id=current_user.id,
                 session_id=session_id,
                 provider=llm_provider,

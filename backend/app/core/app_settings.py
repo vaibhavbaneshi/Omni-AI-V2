@@ -130,6 +130,10 @@ class AppSettings(BaseSettings):
 
     ENABLE_DEEP_RESEARCH: bool = False
     ENABLE_DOCUMENT_INTELLIGENCE: bool = False
+    # Phase B — rewrite follow-up queries before retrieval.
+    ENABLE_QUERY_REWRITING: bool = True
+    HYBRID_SEMANTIC_WEIGHT: float = 0.65
+    HYBRID_BM25_WEIGHT: float = 0.35
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     GITHUB_CLIENT_ID: str = ""

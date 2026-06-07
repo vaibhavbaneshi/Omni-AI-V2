@@ -63,6 +63,50 @@ def evaluate_orchestration_cases(cases: list[dict[str, Any]]) -> list[dict[str, 
     return results
 
 
+def benchmark_hybrid_retrieval(
+    cases: list[dict[str, Any]],
+    *,
+    user_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """Compare semantic-only vs weighted hybrid ranking for benchmark cases."""
+    from app.services.hybrid_search import bm25_search, hybrid_search_ranked, semantic_search
+
+    results: list[dict[str, Any]] = []
+
+    for case in cases:
+        query = case.get("question") or case.get("query") or ""
+        if not query:
+            continue
+
+        kwargs = {
+            "user_id": user_id or case.get("user_id"),
+            "workspace_id": case.get("workspace_id", "default"),
+            "collection_id": case.get("collection_id"),
+            "session_id": case.get("session_id"),
+        }
+        top_k = int(case.get("top_k", 5))
+
+        semantic_docs = semantic_search(query, top_k=top_k, **kwargs)
+        bm25_docs = bm25_search(query, top_k=top_k, **kwargs)
+        hybrid_ranked = hybrid_search_ranked(query, top_k=top_k, **kwargs)
+        hybrid_docs = [doc for doc, _ in hybrid_ranked]
+
+        results.append(
+            {
+                "id": case.get("id", query[:40]),
+                "query": query,
+                "semantic_top": semantic_docs[:top_k],
+                "bm25_top": bm25_docs[:top_k],
+                "hybrid_top": hybrid_docs,
+                "hybrid_scores": hybrid_ranked,
+                "semantic_hybrid_overlap": len(set(semantic_docs).intersection(hybrid_docs)),
+                "bm25_hybrid_overlap": len(set(bm25_docs).intersection(hybrid_docs)),
+            }
+        )
+
+    return results
+
+
 def _resolve_answer(case: dict[str, Any], *, generate_answers: bool) -> str:
     if generate_answers:
         try:
@@ -82,6 +126,7 @@ def run_evaluation(
     output_dir: Path | None = None,
     run_rag: bool = True,
     run_orchestration: bool = True,
+    run_hybrid_benchmark: bool = False,
     generate_answers: bool = False,
     engine_preference: str = "auto",
 ) -> dict[str, Any]:
@@ -111,9 +156,14 @@ def run_evaluation(
     if run_orchestration:
         orchestration_results = evaluate_orchestration_cases(cases)
 
+    hybrid_benchmark_results: list[dict[str, Any]] = []
+    if run_hybrid_benchmark:
+        hybrid_benchmark_results = benchmark_hybrid_retrieval(cases)
+
     summary: dict[str, Any] = {
         "cases_evaluated": len(rag_results),
         "orchestration_cases": len(orchestration_results),
+        "hybrid_benchmark_cases": len(hybrid_benchmark_results),
     }
 
     if rag_results:
@@ -130,6 +180,13 @@ def run_evaluation(
             4,
         )
 
+    if hybrid_benchmark_results:
+        summary["avg_semantic_hybrid_overlap"] = round(
+            sum(row.get("semantic_hybrid_overlap", 0) for row in hybrid_benchmark_results)
+            / max(len(hybrid_benchmark_results), 1),
+            4,
+        )
+
     report: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "dataset": str(dataset),
@@ -138,6 +195,7 @@ def run_evaluation(
         "summary": summary,
         "rag_results": rag_results,
         "orchestration_results": orchestration_results,
+        "hybrid_benchmark_results": hybrid_benchmark_results,
     }
 
     json_path = write_json_report(report, output)

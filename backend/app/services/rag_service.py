@@ -37,9 +37,22 @@ def retrieve_context(
     workspace_id="default",
     collection_id=None,
     session_id=None,
+    *,
+    history: str = "",
+    summary: str = "",
 ):
+    from app.services.query_contextualizer_service import resolve_retrieval_query
+
+    retrieval_query, _original = resolve_retrieval_query(
+        query,
+        history=history,
+        summary=summary,
+        user_id=user_id,
+        session_id=session_id,
+    )
+
     cached = get_retrieval_cache(
-        query=query,
+        query=retrieval_query,
         user_id=user_id,
         workspace_id=workspace_id,
         collection_id=collection_id,
@@ -50,7 +63,7 @@ def retrieve_context(
 
     with traced_span("retrieval.hybrid", user_id=user_id, workspace_id=workspace_id):
         chunks = hybrid_search(
-            query=query,
+            query=retrieval_query,
             top_k=10,
             user_id=user_id,
             workspace_id=workspace_id,
@@ -62,14 +75,14 @@ def retrieve_context(
         return ""
 
     reranked_chunks = rerank_documents(
-        query=query,
+        query=retrieval_query,
         documents=chunks,
         top_k=3
     )
 
     context = sanitize_retrieved_context(reranked_chunks)
     cache_retrieval_result(
-        query=query,
+        query=retrieval_query,
         user_id=user_id,
         workspace_id=workspace_id,
         collection_id=collection_id,
@@ -85,9 +98,22 @@ def retrieve_context_details(
     workspace_id="default",
     collection_id=None,
     session_id=None,
+    *,
+    history: str = "",
+    summary: str = "",
 ):
+    from app.services.query_contextualizer_service import resolve_retrieval_query
+
+    retrieval_query, original_query = resolve_retrieval_query(
+        query,
+        history=history,
+        summary=summary,
+        user_id=user_id,
+        session_id=session_id,
+    )
+
     chunks = hybrid_search(
-        query=query,
+        query=retrieval_query,
         top_k=10,
         user_id=user_id,
         workspace_id=workspace_id,
@@ -96,7 +122,7 @@ def retrieve_context_details(
     )
 
     sources = semantic_search_with_metadata(
-        query=query,
+        query=retrieval_query,
         top_k=5,
         user_id=user_id,
         workspace_id=workspace_id,
@@ -112,7 +138,7 @@ def retrieve_context_details(
         ]
 
     reranked_chunks = rerank_documents(
-        query=query,
+        query=retrieval_query,
         documents=chunks,
         top_k=3
     ) if chunks else []
@@ -142,6 +168,8 @@ def retrieve_context_details(
         "sources": ranked_sources,
         "strategy": "hybrid-rerank",
         "chunks": len(ranked_sources),
+        "retrieval_query": retrieval_query,
+        "original_query": original_query,
     }
 
 
@@ -299,6 +327,7 @@ def stream_response(
     route=None,
     require_grounding=False,
     document_summary=False,
+    multi_document=False,
     user_id=None,
     session_id=None,
     provider=None,
@@ -314,6 +343,7 @@ def stream_response(
         mode=mode or "research",
         require_grounding=require_grounding,
         document_summary=document_summary,
+        multi_document=multi_document,
     )
 
     yield from invoke_stream(
