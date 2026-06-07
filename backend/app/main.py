@@ -2,7 +2,11 @@ from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 
-import app.core.chroma_client  # noqa: F401 — silence Chroma telemetry before other imports
+import os
+
+# Silence Chroma telemetry before chromadb is imported (lazy, on first vector-store use).
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("CHROMA_TELEMETRY", "FALSE")
 
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,6 +63,10 @@ async def lifespan(app: FastAPI):
 
     startup = run_startup_checks()
     logger.info("Startup complete: %s", startup.get("status"))
+    logger.info(
+        "HTTP server ready — Railway PORT=%s (health: GET /health/live)",
+        os.environ.get("PORT", "8000"),
+    )
     if settings.INGEST_IN_BACKGROUND:
         if settings.ingest_uses_rq_queue:
             logger.info(
@@ -140,9 +148,18 @@ def root():
     return {"message": "OmniAI Backend Running", "environment": settings.ENVIRONMENT}
 
 
+@app.get("/health/live")
+def health_live():
+    """Instant liveness probe — no DB/Chroma/LLM calls. Use for Railway health checks."""
+    return {"status": "ok"}
+
+
 @app.get("/health")
 def health(
-    deep: bool = Query(default=False, description="Probe database, Chroma, and LLM network"),
+    deep: bool = Query(
+        default=False,
+        description="When true, probe database, Chroma, and LLM network (may be slow)",
+    ),
 ):
     return run_health_checks(
         probe_llm_network=deep,

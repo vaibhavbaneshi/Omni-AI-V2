@@ -35,7 +35,10 @@ def setup_logging(log_level: str = "INFO") -> None:
     if logger.handlers:
         logger.handlers = []
 
-    logger.addHandler(file_handler)
+    # Railway captures stdout/stderr only — skip file logging in production.
+    env = os.environ.get("ENVIRONMENT", "development").strip().lower()
+    if env != "production":
+        logger.addHandler(file_handler)
     logger.addHandler(console_handler)
 
     # Reduce verbosity of some noisy loggers

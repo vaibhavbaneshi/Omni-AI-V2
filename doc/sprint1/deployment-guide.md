@@ -116,7 +116,9 @@ If using a single Dockerfile, override start command in Railway:
 
 ### Health Checks
 
-- **API:** `GET /health`
+- **Railway liveness:** `GET /health/live` — instant, no DB/Chroma (configured in `railway.toml`)
+- **Shallow:** `GET /health` — config-only checks
+- **Deep readiness:** `GET /health?deep=true` — probes Postgres, Chroma, LLM
 - **Worker:** no HTTP port — monitor via:
   - Railway logs (`Starting ingestion worker`)
   - `GET /admin/ingestion-queue/metrics` on API

@@ -3,8 +3,7 @@
 set -e
 cd /app/backend
 
-python -c "from app.db.migrations import run_migrations; run_migrations()" \
-  || echo "WARN: migrations failed; API may start before schema is ready"
+# Migrations run in a background thread inside app.main lifespan — do not block here.
 
 if [ "${START_RQ_WORKER:-false}" = "true" ]; then
   python -m app.worker &
