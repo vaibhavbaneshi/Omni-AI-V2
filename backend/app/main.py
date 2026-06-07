@@ -153,7 +153,7 @@ def root():
 @app.get("/health/live")
 def health_live():
     """Instant liveness probe — no DB/Chroma/LLM calls. Use for Railway health checks."""
-    return {"status": "ok"}
+    return {"status": "ok", "port": os.environ.get("PORT", "8000")}
 
 
 @app.get("/health/ready")

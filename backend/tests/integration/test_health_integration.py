@@ -4,7 +4,9 @@
 def test_liveness_health(client):
     response = client.get("/health/live")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert "port" in payload
     assert "X-Trace-Id" in response.headers
 
 
