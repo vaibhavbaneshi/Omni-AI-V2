@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -102,12 +102,7 @@ import {
   SelectValue,
   SelectGroup,
 } from "@/components/ui/select";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-
-const syntaxTheme = vscDarkPlus as Record<string, CSSProperties>;
+import { MarkdownMessage } from "@/components/chat/markdown-message";
 
 type Message = {
   id: string;
@@ -212,6 +207,7 @@ export default function ChatPage() {
     cancel: cancelChatStream,
   } = useChatStream();
   const [searchQuery, setSearchQuery] = useState("");
+  const [sessionActionError, setSessionActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (models.some((model) => model.id === selectedModel)) return;
@@ -544,19 +540,35 @@ export default function ChatPage() {
   };
 
   const handleDeleteChat = async (chatId: string) => {
+    setSessionActionError(null);
+
     if (isBackendSessionId(chatId)) {
       try {
         await deleteChatSession(Number(chatId), session?.token);
-      } catch {
-        // still remove locally if backend already deleted
+      } catch (error) {
+        setSessionActionError(
+          sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
+            fallback: "Could not delete this chat. Please try again.",
+            status: error instanceof ApiError ? error.status : undefined,
+          })
+        );
+        return;
       }
     }
 
-    const remainingChats = chats.filter((c) => c.id !== chatId);
-    setChats(remainingChats);
-    if (activeChat?.id === chatId) {
-      setActiveChat(remainingChats[0] || null);
-    }
+    setChats((prev) => {
+      const remaining = prev.filter((c) => c.id !== chatId);
+      setActiveChat((current) => {
+        if (current?.id !== chatId) {
+          return current;
+        }
+        const next = remaining[0] ?? null;
+        const nextUrl = next ? `/chat?id=${encodeURIComponent(next.id)}` : "/chat";
+        window.history.replaceState(null, "", nextUrl);
+        return next;
+      });
+      return remaining;
+    });
   };
 
   const handleCopy = (content: string, id: string) => {
@@ -660,6 +672,7 @@ export default function ChatPage() {
       timestamp: new Date(),
       messages: activeChat?.messages || [],
     };
+    activeChatIdRef.current = createdChat.id;
     setActiveChat(createdChat);
     setChats((prev) => [createdChat, ...prev.filter((chat) => chat.id !== activeChat?.id)]);
     return createdChat;
@@ -856,6 +869,12 @@ export default function ChatPage() {
                     <Command className="size-3" />K
                   </div>
                 </div>
+                {sessionActionError && (
+                  <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive">
+                    <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+                    <span>{sessionActionError}</span>
+                  </div>
+                )}
               </div>
 
               {/* Chat List */}
@@ -1218,50 +1237,12 @@ export default function ChatPage() {
                         <SourcesPanel sources={message.sources || []} />
 
                         {/* Message Content */}
-                        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:text-[15px] prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 prose-pre:shadow-none prose-pre:m-0 prose-code:text-primary prose-code:font-normal prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-headings:font-semibold prose-headings:tracking-tight prose-h2:text-[18px] prose-h2:mt-6 prose-h2:mb-4 prose-h3:text-[15px] prose-h3:mt-5 prose-h3:mb-2 prose-ul:my-3 prose-li:my-1 text-foreground/90">
-                          <ReactMarkdown
-                            skipHtml
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              code({ className, children }) {
-                                const match = /language-(\w+)/.exec(className || "");
-                                return match ? (
-                                  <div className="relative mt-4 mb-6 rounded-xl overflow-hidden border border-white/5 shadow-inner bg-[#050505]">
-                                    <div className="flex items-center justify-between px-4 py-2 bg-white/[0.02] border-b border-white/5 text-[11px] text-muted-foreground/60 font-medium">
-                                      <span>{match[1]}</span>
-                                      <button
-                                        onClick={() => handleCopy(String(children).replace(/\n$/, ""), message.id)}
-                                        className="hover:text-foreground transition-colors flex items-center gap-1.5"
-                                      >
-                                        {copiedId === message.id ? <Check className="size-3" /> : <Copy className="size-3" />}
-                                        {copiedId === message.id ? "Copied" : "Copy"}
-                                      </button>
-                                    </div>
-                                    <SyntaxHighlighter
-                                      style={syntaxTheme}
-                                      language={match[1]}
-                                      PreTag="div"
-                                      customStyle={{
-                                        margin: 0,
-                                        padding: "1rem",
-                                        background: "transparent",
-                                        fontSize: "13px",
-                                      }}
-                                    >
-                                      {String(children).replace(/\n$/, "")}
-                                    </SyntaxHighlighter>
-                                  </div>
-                                ) : (
-                                  <code className={className}>
-                                    {children}
-                                  </code>
-                                );
-                              },
-                            }}
-                          >
-                            {message.content}
-                          </ReactMarkdown>
-                        </div>
+                        <MarkdownMessage
+                          content={message.content}
+                          copiedId={copiedId}
+                          copyTargetId={message.id}
+                          onCopy={handleCopy}
+                        />
 
                         {/* Message Actions */}
                         <div className="flex items-center gap-2 mt-6 pt-3 border-t border-white/5">
@@ -1347,10 +1328,12 @@ export default function ChatPage() {
                     <ToolVisibility meta={streamingMeta || undefined} memoryFacts={memoryFacts} live />
                     <SourcesPanel sources={streamingMeta?.sources || []} compact />
                     {streamingContent ? (
-                      <div className="whitespace-pre-wrap text-[15px] leading-[1.7] text-foreground/90">
-                        {streamingContent}
-                        <span className="inline-block w-2 animate-pulse text-primary">█</span>
-                      </div>
+                      <MarkdownMessage
+                        content={streamingContent}
+                        trailing={
+                          <span className="inline-block w-2 animate-pulse text-primary not-prose">█</span>
+                        }
+                      />
                     ) : (
                       <div className="flex flex-wrap items-center gap-3">
                         <div className="size-5 rounded bg-primary/20 flex items-center justify-center border border-primary/30 shadow-[0_0_10px_rgba(var(--primary),0.15)]">

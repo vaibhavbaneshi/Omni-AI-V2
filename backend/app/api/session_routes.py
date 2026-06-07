@@ -1,7 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Query
-from fastapi import Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from sqlalchemy.orm import Session
 
@@ -158,7 +157,7 @@ def delete_session(
         session_id=session_id,
     )
     if not deleted:
-        return {"error": "Session not found"}
+        raise HTTPException(status_code=404, detail="Session not found")
     return {"message": "Session deleted", "session_id": session_id}
 
 

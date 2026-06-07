@@ -71,3 +71,33 @@ def test_delete_session(auth_client, db_session):
         headers=auth_client.auth_headers,
     )
     assert messages.json() == []
+
+    listed = auth_client.get("/sessions", headers=auth_client.auth_headers)
+    assert all(row["id"] != session.id for row in listed.json())
+
+
+def test_delete_session_with_model_usage(auth_client, db_session):
+    from app.models.analytics import ModelUsage
+
+    session = ChatSessionFactory(user=auth_client.auth_user, title="Usage Chat")
+    db_session.add(
+        ModelUsage(
+            user_id=auth_client.auth_user.id,
+            session_id=session.id,
+            provider="groq",
+            model="test-model",
+            endpoint="chat",
+            latency_ms=10.0,
+            success=True,
+        )
+    )
+    db_session.commit()
+
+    response = auth_client.delete(
+        f"/sessions/{session.id}",
+        headers=auth_client.auth_headers,
+    )
+    assert response.status_code == 200
+
+    listed = auth_client.get("/sessions", headers=auth_client.auth_headers)
+    assert all(row["id"] != session.id for row in listed.json())

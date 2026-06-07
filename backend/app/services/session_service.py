@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.models.analytics import ModelUsage, TokenUsage
 from app.models.chat_session import ChatSession
 from app.models.conversation_summary import ConversationSummary
 from app.models.document import DocumentRecord
 from app.models.message import Message
 from app.services.documents_services import get_document_collection
+
+logger = logging.getLogger(__name__)
 
 
 def delete_chat_session(
@@ -74,6 +79,25 @@ def delete_chat_session(
         ConversationSummary.session_id == session_id
     ).delete(synchronize_session=False)
 
+    # Analytics rows reference chat_sessions; detach instead of blocking delete.
+    db.query(TokenUsage).filter(TokenUsage.session_id == session_id).update(
+        {TokenUsage.session_id: None},
+        synchronize_session=False,
+    )
+    db.query(ModelUsage).filter(ModelUsage.session_id == session_id).update(
+        {ModelUsage.session_id: None},
+        synchronize_session=False,
+    )
+
     db.delete(session)
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(
+            "Failed to delete chat session session_id=%s user_id=%s",
+            session_id,
+            user_id,
+        )
+        return False
     return True

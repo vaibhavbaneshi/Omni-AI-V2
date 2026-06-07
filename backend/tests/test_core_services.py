@@ -83,3 +83,48 @@ def test_delete_chat_session_removes_messages(mock_get_collection, db_session):
     )
     assert deleted is True
     assert db_session.query(MessageFactory._meta.model).filter_by(session_id=session.id).count() == 0
+
+
+@patch("app.services.session_service.get_document_collection")
+def test_delete_chat_session_detaches_analytics_usage(mock_get_collection, db_session):
+    from app.models.analytics import ModelUsage, TokenUsage
+    from app.models.chat_session import ChatSession
+
+    mock_chroma = mock_get_collection.return_value
+    mock_chroma.get.return_value = {"ids": []}
+    session = ChatSessionFactory()
+    model_usage = ModelUsage(
+        user_id=session.user_id,
+        session_id=session.id,
+        provider="groq",
+        model="test-model",
+        endpoint="chat",
+        latency_ms=12.5,
+        success=True,
+    )
+    db_session.add(model_usage)
+    db_session.commit()
+    db_session.refresh(model_usage)
+
+    token_usage = TokenUsage(
+        user_id=session.user_id,
+        session_id=session.id,
+        model_usage_id=model_usage.id,
+        provider="groq",
+        model="test-model",
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+    )
+    db_session.add(token_usage)
+    db_session.commit()
+
+    deleted = delete_chat_session(
+        db_session,
+        user_id=session.user_id,
+        session_id=session.id,
+    )
+    assert deleted is True
+    assert db_session.query(ChatSession).filter_by(id=session.id).count() == 0
+    assert db_session.query(ModelUsage).filter_by(id=model_usage.id).one().session_id is None
+    assert db_session.query(TokenUsage).filter_by(id=token_usage.id).one().session_id is None
