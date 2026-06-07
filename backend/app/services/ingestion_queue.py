@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 from rq import Queue, Retry
@@ -22,6 +23,9 @@ INGEST_DLQ_NAME = "ingest-dlq"
 INGEST_JOB_PATH = "app.jobs.ingestion_jobs.execute_ingestion_job"
 DLQ_JOB_PATH = "app.jobs.ingestion_jobs.record_dead_letter"
 JOB_TIMEOUT_SECONDS = 1800  # 30 minutes — large PDFs + cold HF embeddings
+
+_inline_recovery_lock = threading.Lock()
+_inline_recovery_started: set[int] = set()
 
 
 def _retry_policy() -> Retry:
@@ -50,7 +54,7 @@ def get_ingest_job_info(job_id: str) -> dict | None:
         return None
     return {
         "job_id": job.id,
-        "status": job.get_status(),
+        "status": str(job.get_status()),
         "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
         "started_at": job.started_at.isoformat() if job.started_at else None,
         "origin": job.origin,
@@ -76,11 +80,17 @@ def build_stale_queued_message(document: DocumentRecord, elapsed_seconds: int) -
     job_info = get_ingest_job_info(document.indexing_job_id) if document.indexing_job_id else None
 
     parts = [f"Indexing stuck at 'queued' for {elapsed_seconds}s."]
+    if document.indexing_error:
+        parts.append(f"Last error: {document.indexing_error}")
+    elif metrics.get("failed_jobs"):
+        parts.append(
+            f"{metrics['failed_jobs']} job(s) failed recently — often HF_TOKEN/auth. "
+            "Check Railway logs for [EMBEDDING_AUTH_ERROR] or 401 Unauthorized."
+        )
     if worker_count == 0:
         parts.append(
-            "No RQ ingestion workers are connected to Redis — the API enqueued the job but nothing is "
-            "processing it. On Railway, run API + worker in one service "
-            "(default Dockerfile CMD uses scripts/railway_web_and_worker.sh)."
+            "No RQ workers connected — ingestion should auto-fallback to the API process; "
+            "if this persists, redeploy with the default Dockerfile CMD (railway_web_and_worker.sh)."
         )
     elif worker_count < 0:
         parts.append("Could not reach Redis to check workers — verify REDIS_URL.")
@@ -94,10 +104,70 @@ def build_stale_queued_message(document: DocumentRecord, elapsed_seconds: int) -
         parts.append(
             f"job_id={job_info['job_id']} job_status={job_info['status']}."
         )
-    if metrics.get("failed_jobs"):
-        parts.append(f"failed_jobs={metrics['failed_jobs']} — check GET /admin/ingestion-queue/metrics.")
 
     return " ".join(parts)
+
+
+def run_ingest_inline_thread(document_id: int, *, db: Session | None = None) -> None:
+    """Run ingestion inside the API container when RQ workers are unavailable."""
+    from app.services.ingestion_service import run_ingest_document_record
+
+    if db is not None:
+        update_indexing_progress(db, document_id, stage="queued", mark_started=True)
+
+    def _run() -> None:
+        run_ingest_document_record(document_id, job_id=f"inline-{document_id}")
+
+    threading.Thread(
+        target=_run,
+        name=f"ingest-inline-{document_id}",
+        daemon=True,
+    ).start()
+    logger.info("[INGEST_INLINE_START] document_id=%s pid=%s", document_id, __import__("os").getpid())
+
+
+def try_recover_stuck_queued_document(document_id: int) -> bool:
+    """One-shot recovery for documents stuck in Redis while no worker is connected."""
+    if get_active_worker_count() != 0:
+        return False
+    with _inline_recovery_lock:
+        if document_id in _inline_recovery_started:
+            return False
+        _inline_recovery_started.add(document_id)
+    logger.warning(
+        "[INGEST_INLINE_RECOVERY] document_id=%s — no RQ workers, starting in-process ingest",
+        document_id,
+    )
+    run_ingest_inline_thread(document_id)
+    return True
+
+
+def dispatch_document_ingestion(db: Session, document_id: int) -> dict:
+    """Enqueue to RQ when a worker is connected; otherwise ingest in-process."""
+    worker_count = get_active_worker_count()
+    if worker_count > 0:
+        job_id = enqueue_document_ingestion(db, document_id)
+        return {
+            "dispatch": "rq",
+            "job_id": job_id,
+            "worker_count": worker_count,
+        }
+
+    logger.warning(
+        "[INGEST_FALLBACK_INLINE] document_id=%s worker_count=%s — skipping RQ, using API process",
+        document_id,
+        worker_count,
+    )
+    run_ingest_inline_thread(document_id, db=db)
+    return {
+        "dispatch": "inline_thread",
+        "job_id": None,
+        "worker_count": worker_count,
+        "warning": (
+            "No RQ worker connected — indexing runs in the API process instead of the queue. "
+            "Check deploy logs for [worker-supervisor]."
+        ),
+    }
 
 
 def get_ingest_queue() -> Queue:

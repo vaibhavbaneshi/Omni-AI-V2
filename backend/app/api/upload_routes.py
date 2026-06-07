@@ -21,9 +21,10 @@ from app.core.upload_validation import sanitize_upload_filename, validate_docume
 from app.services.indexing_progress import document_status_payload, update_indexing_progress
 from app.services.ingestion_service import detect_stale_indexing, run_ingest_document_record
 from app.services.ingestion_queue import (
-    enqueue_document_ingestion,
+    dispatch_document_ingestion,
     ingest_queue_enabled,
     should_use_background_tasks,
+    try_recover_stuck_queued_document,
 )
 from app.services.usage_tracking_service import record_ingestion_event
 from app.services.file_scanner import FileScanError, scan_uploaded_file
@@ -218,22 +219,20 @@ async def upload_document(
 
     if settings.INGEST_IN_BACKGROUND:
         if ingest_queue_enabled():
-            job_id = enqueue_document_ingestion(db, document.id)
-            from app.services.ingestion_queue import get_active_worker_count
-
-            worker_count = get_active_worker_count()
+            dispatch = dispatch_document_ingestion(db, document.id)
             logger.info(
                 "[INGEST_QUEUED] document_id=%s job_id=%s filename=%s size=%s user_id=%s session_id=%s "
-                "storage_path=%s embedding_provider=%s dispatch=rq worker_count=%s",
+                "storage_path=%s embedding_provider=%s dispatch=%s worker_count=%s",
                 document.id,
-                job_id,
+                dispatch.get("job_id"),
                 safe_name,
                 file_size,
                 current_user.id,
                 session_id,
                 file_path,
                 settings.EMBEDDING_PROVIDER,
-                worker_count,
+                dispatch.get("dispatch"),
+                dispatch.get("worker_count"),
             )
             response: dict = {
                 "message": "Document uploaded. Indexing in background.",
@@ -242,14 +241,12 @@ async def upload_document(
                 "indexing": True,
                 "collection_id": collection_record.id,
                 "document_id": document.id,
-                "job_id": job_id,
-                "worker_count": worker_count,
+                "job_id": dispatch.get("job_id"),
+                "worker_count": dispatch.get("worker_count"),
+                "dispatch": dispatch.get("dispatch"),
             }
-            if worker_count == 0:
-                response["warning"] = (
-                    "No ingestion worker is running — indexing will stay queued until you start "
-                    "python -m app.worker in the same Railway service."
-                )
+            if dispatch.get("warning"):
+                response["warning"] = dispatch["warning"]
             return response
         elif should_use_background_tasks():
             update_indexing_progress(db, document.id, stage="queued", mark_started=True)
@@ -440,6 +437,11 @@ def get_document_status(
             payload["worker_count"] = get_active_worker_count()
             if document.indexing_job_id:
                 payload["job"] = get_ingest_job_info(document.indexing_job_id)
+            if payload.get("worker_count") == 0 and try_recover_stuck_queued_document(document.id):
+                payload["recovery"] = "inline_ingest_started"
+                payload["stale_message"] = (
+                    f"{stale_message} Recovery: started in-process indexing in the API container."
+                )
         logger.warning(
             "[INGEST_STALE] document_id=%s job_id=%s stage=%s elapsed=%s worker_count=%s message=%s",
             document.id,
