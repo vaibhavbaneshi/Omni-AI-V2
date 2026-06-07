@@ -1,5 +1,6 @@
 """Unit tests for Redis + RQ ingestion queue."""
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -27,6 +28,48 @@ def test_ingest_queue_disabled_without_redis(monkeypatch):
     monkeypatch.setenv("REDIS_HOST", "")
     get_settings.cache_clear()
     assert get_settings().ingest_uses_rq_queue is False
+
+
+def test_resolve_ingest_worker_name_is_unique_per_pid(monkeypatch):
+    monkeypatch.delenv("INGEST_WORKER_NAME", raising=False)
+    monkeypatch.setenv("HOSTNAME", "railway-test")
+    get_settings.cache_clear()
+
+    from app.services.ingestion_queue import resolve_ingest_worker_name
+
+    name = resolve_ingest_worker_name()
+    assert name.startswith("omniai-ingest-railway-test-")
+    assert str(os.getpid()) in name
+    get_settings.cache_clear()
+
+
+def test_resolve_ingest_worker_name_honors_env_override(monkeypatch):
+    monkeypatch.setenv("INGEST_WORKER_NAME", "custom-worker")
+    get_settings.cache_clear()
+
+    from app.services.ingestion_queue import resolve_ingest_worker_name
+
+    assert resolve_ingest_worker_name() == "custom-worker"
+    get_settings.cache_clear()
+
+
+@patch("rq.worker.Worker")
+def test_cleanup_legacy_ingest_worker_registrations(mock_worker_cls):
+    from app.services.ingestion_queue import (
+        LEGACY_FIXED_WORKER_NAME,
+        cleanup_legacy_ingest_worker_registrations,
+    )
+
+    legacy = MagicMock()
+    legacy.name = LEGACY_FIXED_WORKER_NAME
+    current = MagicMock()
+    current.name = "omniai-ingest-other-123"
+    mock_worker_cls.all.return_value = [legacy, current]
+
+    cleanup_legacy_ingest_worker_registrations(MagicMock())
+
+    legacy.register_death.assert_called_once()
+    current.register_death.assert_not_called()
 
 
 @patch("app.services.ingestion_queue.get_ingest_queue")

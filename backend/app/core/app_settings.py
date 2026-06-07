@@ -94,6 +94,8 @@ class AppSettings(BaseSettings):
     INGEST_JOB_RETRY_INTERVALS: str = "30,60,120"
     INGEST_JOB_RESULT_TTL_SECONDS: int = 86400
     INGEST_JOB_FAILURE_TTL_SECONDS: int = 604800
+    # Optional fixed RQ worker name; leave empty for auto (recommended on Railway).
+    INGEST_WORKER_NAME: str = ""
     # CrossEncoder reranker adds ~300MB RAM — disable on memory-constrained deploys.
     ENABLE_RERANKER: bool = True
 

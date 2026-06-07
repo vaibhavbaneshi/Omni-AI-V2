@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import threading
 import time
 
@@ -32,6 +34,47 @@ def _retry_policy() -> Retry:
     settings = get_settings()
     intervals = settings.ingest_job_retry_intervals
     return Retry(max=settings.INGEST_JOB_MAX_RETRIES, interval=intervals)
+
+
+LEGACY_FIXED_WORKER_NAME = "omniai-ingest-worker"
+
+
+def resolve_ingest_worker_name() -> str:
+    """Unique RQ worker name per container/process (avoids Railway restart collisions)."""
+    settings = get_settings()
+    configured = (settings.INGEST_WORKER_NAME or "").strip()
+    if configured:
+        return configured
+
+    ident = (
+        os.environ.get("RAILWAY_REPLICA_ID")
+        or os.environ.get("RAILWAY_DEPLOYMENT_ID")
+        or os.environ.get("HOSTNAME")
+        or "local"
+    )
+    safe_ident = re.sub(r"[^A-Za-z0-9_-]+", "-", ident).strip("-") or "local"
+    return f"omniai-ingest-{safe_ident}-{os.getpid()}"
+
+
+def cleanup_legacy_ingest_worker_registrations(conn) -> None:
+    """Remove stale fixed-name worker keys left by older deployments."""
+    try:
+        from rq.worker import Worker
+    except ImportError:
+        return
+
+    try:
+        for worker in Worker.all(connection=conn):
+            if worker.name != LEGACY_FIXED_WORKER_NAME:
+                continue
+            logger.warning(
+                "Removing legacy RQ worker registration name=%s pid=%s",
+                worker.name,
+                getattr(worker, "pid", None),
+            )
+            worker.register_death()
+    except Exception:
+        logger.exception("Failed to clean up legacy ingest worker registrations")
 
 
 def get_active_worker_count() -> int:
