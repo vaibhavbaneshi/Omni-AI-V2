@@ -33,11 +33,17 @@ async def resolve_chat_stream_request(request: Request) -> ChatStreamRequest:
     """Accept JSON body or query-string parameters for backward compatibility."""
     content_type = (request.headers.get("content-type") or "").lower()
     if "application/json" in content_type:
-        payload = await request.json()
         try:
-            return ChatStreamRequest.model_validate(payload)
-        except ValidationError as exc:
-            raise HTTPException(status_code=422, detail=exc.errors()) from exc
+            payload = await request.json()
+        except Exception:
+            payload = None
+
+        if isinstance(payload, dict) and payload:
+            try:
+                return ChatStreamRequest.model_validate(payload)
+            except ValidationError as exc:
+                raise HTTPException(status_code=422, detail=exc.errors()) from exc
+        # Empty or invalid JSON body — fall through to query params (common for POST + ?query=...).
 
     query_params = request.query_params
     if not query_params.get("query") or not query_params.get("session_id"):

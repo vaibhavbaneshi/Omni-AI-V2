@@ -81,6 +81,34 @@ def test_chat_stream_invalid_json_body_returns_422(auth_client, db_session):
 @patch("app.api.chat_routes.summarize_conversation", return_value="")
 @patch("app.api.chat_routes.stream_response")
 @patch("app.api.chat_routes.tool_calling_agent")
+def test_chat_stream_empty_json_body_uses_query_params(
+    mock_agent,
+    mock_stream,
+    _mock_summary,
+    _mock_generate_summary,
+    _mock_should_refine,
+    auth_client,
+    db_session,
+):
+    session = ChatSessionFactory(user=auth_client.auth_user, title="Query Params Chat")
+    mock_agent.return_value = _agent_payload()
+    mock_stream.return_value = iter(["Hi"])
+
+    response = auth_client.post(
+        f"/chat-stream?query=hello&session_id={session.id}&mode=research",
+        headers={**auth_client.auth_headers, "Content-Type": "application/json"},
+        content=b"",
+    )
+
+    assert response.status_code == 200
+    assert '"type": "token"' in response.text
+
+
+@patch("app.api.chat_routes.should_refine_session_title", return_value=False)
+@patch("app.api.chat_routes.generate_summary")
+@patch("app.api.chat_routes.summarize_conversation", return_value="")
+@patch("app.api.chat_routes.stream_response")
+@patch("app.api.chat_routes.tool_calling_agent")
 def test_prompt_injection_writes_security_audit(
     mock_agent,
     mock_stream,

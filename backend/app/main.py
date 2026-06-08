@@ -151,20 +151,17 @@ if AVATAR_DIR.exists():
     app.mount("/uploads/avatars", StaticFiles(directory=str(AVATAR_DIR)), name="avatars")
 
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    try:
-        return await call_next(request)
-    except Exception:
-        logger.exception(
-            "Unhandled exception while processing request %s %s",
-            request.method,
-            request.url,
-        )
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error. Check backend logs for details."},
-        )
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception(
+        "Unhandled exception while processing request %s %s",
+        request.method,
+        request.url,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. Check backend logs for details."},
+    )
 
 
 @app.get("/")

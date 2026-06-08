@@ -226,7 +226,11 @@ class AppSettings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        origins = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        frontend = self.FRONTEND_URL.strip().rstrip("/")
+        if frontend and frontend not in origins:
+            origins.append(frontend)
+        return origins
 
     @property
     def llm_model_name(self) -> str:
