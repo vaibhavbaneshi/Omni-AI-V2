@@ -8,7 +8,15 @@ from dataclasses import dataclass
 from starlette.requests import Request
 
 
-EXEMPT_PATHS = {"/health", "/health/live", "/health/ready", "/", "/docs", "/openapi.json"}
+EXEMPT_PATHS = {
+    "/health",
+    "/health/live",
+    "/health/ready",
+    "/health/migrations",
+    "/",
+    "/docs",
+    "/openapi.json",
+}
 
 
 @dataclass(frozen=True)

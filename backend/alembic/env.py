@@ -5,7 +5,19 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.app_settings import get_settings
 from app.db.database import Base
-from app.models import analytics, chat_session, conversation_summary, document, memory, message, user
+from app.models import (
+    analytics,
+    chat_folder,
+    chat_session,
+    conversation_summary,
+    document,
+    document_insight,
+    memory,
+    message,
+    research_report,
+    user,
+    user_settings,
+)
 
 config = context.config
 if config.config_file_name is not None:

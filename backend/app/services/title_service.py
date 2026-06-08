@@ -25,6 +25,13 @@ def _generate_title(prompt: str, *, fallback: str) -> str:
         return fallback
 
 
+def optimistic_chat_title(first_message: str | None, *, fallback: str = "New Chat") -> str:
+    """Fast session title without an LLM call (refined later during chat stream)."""
+    if first_message and first_message.strip():
+        return _clean_title(first_message.strip()[:48], fallback=fallback)
+    return _clean_title(fallback, fallback="New Chat")
+
+
 def generate_chat_title(first_message: str) -> str:
     fallback = _clean_title(first_message[:48], fallback="New Chat")
     prompt = f"""Create a short chat title (3-6 words) for this conversation opener.

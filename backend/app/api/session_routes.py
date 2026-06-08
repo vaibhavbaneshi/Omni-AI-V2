@@ -16,6 +16,7 @@ from app.services.folder_service import session_to_list_item, update_session_org
 
 from app.services.title_service import (
     generate_chat_title,
+    optimistic_chat_title,
     refine_chat_title,
 )
 from app.services.session_service import DeleteSessionResult, delete_chat_session
@@ -250,9 +251,10 @@ def create_session_with_title(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    resolved_title = payload.title.strip() or "New Chat"
-    if payload.first_message and payload.first_message.strip():
-        resolved_title = generate_chat_title(payload.first_message.strip())
+    resolved_title = optimistic_chat_title(
+        payload.first_message,
+        fallback=payload.title.strip() or "New Chat",
+    )
 
     session = ChatSession(
         title=resolved_title,

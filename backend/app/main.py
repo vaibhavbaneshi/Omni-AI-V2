@@ -22,7 +22,7 @@ from app.core.cors_utils import cors_headers_for_request
 from app.core.health import run_health_checks, run_startup_checks
 from app.core.logging_config import setup_logging
 from app.core.startup import log_startup_diagnostics
-from app.db.migrations import run_migrations
+from app.db.migrations import migration_status, run_migrations
 from app.api.user_routes import router as user_router
 from app.api.chat_routes import router as chat_router
 from app.api.upload_routes import router as upload_router
@@ -63,13 +63,8 @@ async def lifespan(app: FastAPI):
             configure_langsmith_env(settings)
             log_startup_diagnostics(settings)
 
-            def _migrate() -> None:
-                try:
-                    run_migrations()
-                except Exception as exc:
-                    logger.error("Database migration failed: %s", exc, exc_info=exc)
-
-            threading.Thread(target=_migrate, name="db-migrate", daemon=True).start()
+            run_migrations()
+            app.state.migrations = migration_status()
 
             startup = run_startup_checks()
             logger.info("Startup complete: %s", startup.get("status"))
@@ -187,7 +182,23 @@ def health_ready():
         )
     if not getattr(app.state, "ready", False):
         return JSONResponse(status_code=503, content={"status": "starting"})
-    return {"status": "ready"}
+    migrations = getattr(app.state, "migrations", None) or migration_status()
+    if not migrations.get("up_to_date", True):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "migrations_pending",
+                "detail": "Database schema is behind the application version.",
+                "migrations": migrations,
+            },
+        )
+    return {"status": "ready", "migrations": migrations}
+
+
+@app.get("/health/migrations")
+def health_migrations():
+    """Show Alembic current revision vs head (safe to call without auth)."""
+    return migration_status()
 
 
 @app.get("/health")

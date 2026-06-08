@@ -5,20 +5,18 @@ from unittest.mock import patch
 from tests.factories import ChatSessionFactory, MessageFactory
 
 
-@patch("app.api.session_routes.generate_chat_title", return_value="Billing Question")
-def test_create_session(_mock_title, auth_client):
+def test_create_session(auth_client):
     response = auth_client.post(
         "/sessions?title=New+Chat&first_message=What+is+the+refund+policy",
         headers=auth_client.auth_headers,
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["title"] == "Billing Question"
+    assert "refund" in payload["title"].lower()
     assert "id" in payload
 
 
-@patch("app.api.session_routes.generate_chat_title", return_value="JSON Session")
-def test_create_session_json_body(_mock_title, auth_client):
+def test_create_session_json_body(auth_client):
     response = auth_client.post(
         "/sessions",
         headers={**auth_client.auth_headers, "Content-Type": "application/json"},
@@ -26,7 +24,7 @@ def test_create_session_json_body(_mock_title, auth_client):
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["title"] == "JSON Session"
+    assert payload["title"] == "hello"
     assert "id" in payload
 
 
