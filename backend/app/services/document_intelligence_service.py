@@ -13,8 +13,15 @@ from sqlalchemy.orm import Session
 
 from app.core.app_settings import get_settings
 from app.models.document import DocumentRecord
+from app.models.document_entity import DocumentEntity
 from app.models.document_insight import DocumentInsight
-from app.schemas.document_insight_schemas import DocumentInsightPayload, payload_from_dict
+from app.models.document_timeline import DocumentTimeline
+from app.schemas.document_insight_schemas import (
+    DocumentInsightPayload,
+    StructuredEntity,
+    TimelineEvent,
+    payload_from_dict,
+)
 from app.services.document_loaders import DocumentLoadError, load_document
 from app.services.llm_invoke import invoke_generate
 
@@ -75,7 +82,14 @@ Required JSON shape:
     "topics": ["..."],
     "entities": ["people, orgs, products"],
     "important_dates": ["..."],
-    "statistics": ["notable numbers or metrics"]
+    "statistics": ["notable numbers or metrics"],
+    "risks": ["risk or compliance issue"],
+    "timeline": [
+      {{"date": "YYYY-MM-DD or period", "label": "event title", "description": "what happened", "confidence": "high|medium|low"}}
+    ],
+    "structured_entities": [
+      {{"name": "Entity Name", "entity_type": "person|organization|product|location|other", "mentions": 1, "context": "short context"}}
+    ]
   }}
 }}
 
@@ -222,6 +236,13 @@ def generate_document_insights(
         record.status = "ready"
         record.model = model_name
         record.error_message = None
+        _persist_timeline_and_entities(
+            db,
+            document_id=document_id,
+            user_id=user_id,
+            model_name=model_name,
+            payload=payload,
+        )
         db.commit()
         db.refresh(record)
         logger.info(
@@ -280,13 +301,106 @@ def schedule_document_insights_generation(document_id: int) -> None:
     ).start()
 
 
-def insight_to_response(record: DocumentInsight) -> dict[str, Any]:
+def _persist_timeline_and_entities(
+    db: Session,
+    *,
+    document_id: int,
+    user_id: int,
+    model_name: str,
+    payload: DocumentInsightPayload,
+) -> None:
+    timeline_events = [
+        event.model_dump()
+        for event in payload.metadata_insights.timeline
+        if event.label or event.description or event.date
+    ]
+    timeline = (
+        db.query(DocumentTimeline)
+        .filter(DocumentTimeline.document_id == document_id)
+        .first()
+    )
+    if timeline is None:
+        timeline = DocumentTimeline(
+            document_id=document_id,
+            user_id=user_id,
+            events=timeline_events,
+            model=model_name,
+        )
+        db.add(timeline)
+    else:
+        timeline.events = timeline_events
+        timeline.model = model_name
+        timeline.user_id = user_id
+
+    db.query(DocumentEntity).filter(DocumentEntity.document_id == document_id).delete()
+
+    structured = payload.metadata_insights.structured_entities or []
+    if not structured and payload.metadata_insights.entities:
+        structured = [
+            StructuredEntity(name=name, entity_type="unknown", mentions=1)
+            for name in payload.metadata_insights.entities
+            if name.strip()
+        ]
+
+    for entity in structured:
+        if not entity.name.strip():
+            continue
+        db.add(
+            DocumentEntity(
+                document_id=document_id,
+                user_id=user_id,
+                name=entity.name.strip()[:512],
+                entity_type=(entity.entity_type or "unknown")[:64],
+                mentions=max(entity.mentions or 1, 1),
+                context=entity.context,
+            )
+        )
+
+
+def _load_timeline_events(db: Session, document_id: int) -> list[dict[str, Any]]:
+    record = db.query(DocumentTimeline).filter(DocumentTimeline.document_id == document_id).first()
+    if not record or not record.events:
+        return []
+    return list(record.events)
+
+
+def _load_structured_entities(db: Session, document_id: int) -> list[dict[str, Any]]:
+    rows = (
+        db.query(DocumentEntity)
+        .filter(DocumentEntity.document_id == document_id)
+        .order_by(DocumentEntity.mentions.desc(), DocumentEntity.name.asc())
+        .all()
+    )
+    return [
+        {
+            "name": row.name,
+            "entity_type": row.entity_type,
+            "mentions": row.mentions,
+            "context": row.context,
+        }
+        for row in rows
+    ]
+
+
+def insight_to_response(record: DocumentInsight, db: Session | None = None) -> dict[str, Any]:
+    payload = payload_from_dict(record.payload)
+    timeline: list[dict[str, Any]] = []
+    entities: list[dict[str, Any]] = []
+    if db is not None:
+        timeline = _load_timeline_events(db, record.document_id)
+        entities = _load_structured_entities(db, record.document_id)
+    elif payload:
+        timeline = [event.model_dump() for event in payload.metadata_insights.timeline]
+        entities = [entity.model_dump() for entity in payload.metadata_insights.structured_entities]
+
     return {
         "document_id": record.document_id,
         "status": record.status,
         "model": record.model,
         "error_message": record.error_message,
-        "payload": payload_from_dict(record.payload).model_dump() if record.payload else None,
+        "payload": payload.model_dump() if payload else None,
+        "timeline": timeline,
+        "entities": entities,
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
     }

@@ -26,12 +26,29 @@ class ActionItem(BaseModel):
     owner: str | None = None
 
 
+class TimelineEvent(BaseModel):
+    date: str = ""
+    label: str = ""
+    description: str = ""
+    confidence: str | None = None
+
+
+class StructuredEntity(BaseModel):
+    name: str
+    entity_type: str = "unknown"
+    mentions: int = 1
+    context: str | None = None
+
+
 class DocumentMetadataInsights(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     topics: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
     important_dates: list[str] = Field(default_factory=list)
     statistics: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    timeline: list[TimelineEvent] = Field(default_factory=list)
+    structured_entities: list[StructuredEntity] = Field(default_factory=list)
 
 
 class DocumentInsightPayload(BaseModel):
@@ -47,6 +64,8 @@ class DocumentInsightResponse(BaseModel):
     model: str | None = None
     error_message: str | None = None
     payload: DocumentInsightPayload | None = None
+    timeline: list[TimelineEvent] = Field(default_factory=list)
+    entities: list[StructuredEntity] = Field(default_factory=list)
     created_at: str | None = None
     updated_at: str | None = None
 

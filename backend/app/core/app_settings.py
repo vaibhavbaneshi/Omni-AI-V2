@@ -138,7 +138,7 @@ class AppSettings(BaseSettings):
 
     ENABLE_DEEP_RESEARCH: bool = False
     ENABLE_AGENT_WORKFLOWS: bool = True
-    ENABLE_DOCUMENT_INTELLIGENCE: bool = False
+    ENABLE_DOCUMENT_INTELLIGENCE: bool = True
     # Phase B — rewrite follow-up queries before retrieval.
     ENABLE_QUERY_REWRITING: bool = True
     HYBRID_SEMANTIC_WEIGHT: float = 0.65

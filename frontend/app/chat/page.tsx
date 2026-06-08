@@ -53,6 +53,7 @@ import { sidebarTransition, fadeUpVariant } from "@/lib/motion";
 import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
 import {
   ApiError,
+  isAuthExpiredError,
   createChatSession,
   createChatFolder,
   deleteChatSession,
@@ -200,6 +201,8 @@ export default function ChatPage() {
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const activeChatIdRef = useRef<string | null>(null);
+  const sessionsLoadSeqRef = useRef(0);
+  const deletedSessionIdsRef = useRef<Set<number>>(new Set());
   const { models, routingEnabled } = useModels();
   const [selectedModel, setSelectedModel] = useState(() => getPreferredModelId());
   const [selectedMode, setSelectedMode] = useState<(typeof workspaceModes)[number]["id"]>("research");
@@ -354,18 +357,27 @@ export default function ChatPage() {
 
     const urlChatId = readStoredActiveChatId();
     syncChatPath();
+    const loadSeq = ++sessionsLoadSeqRef.current;
 
     listChatSessions(session.token)
       .then(async (records) => {
+        if (loadSeq !== sessionsLoadSeqRef.current) return;
+
+        const visibleRecords = records.filter(
+          (record) => !deletedSessionIdsRef.current.has(record.id)
+        );
+
         let folders: ChatFolderRecord[] = [];
         try {
           folders = await listChatFolders(session.token);
         } catch {
           folders = [];
         }
+        if (loadSeq !== sessionsLoadSeqRef.current) return;
+
         setChatFolders(folders);
 
-        const nextChats: Chat[] = records.map((record) => ({
+        const nextChats: Chat[] = visibleRecords.map((record) => ({
           id: String(record.id),
           title: record.title,
           lastMessage: "",
@@ -577,7 +589,7 @@ export default function ChatPage() {
       setActiveChat(completedChat);
       setChats((prev) => prev.map((c) => (c.id === completedChat.id ? completedChat : c)));
     } catch (error) {
-      const isAuthFailure = error instanceof ApiError && error.status === 401;
+      const isAuthFailure = isAuthExpiredError(error) || (error instanceof ApiError && error.status === 401);
       const message = sanitizeChatError(
         error instanceof ApiError ? error.message : undefined,
         error instanceof ApiError ? { status: error.status } : undefined
@@ -685,9 +697,11 @@ export default function ChatPage() {
 
     const backendSessionId = toBackendSessionId(chatId);
     if (backendSessionId !== null) {
+      deletedSessionIdsRef.current.add(backendSessionId);
       try {
         await deleteChatSession(backendSessionId, session?.token);
       } catch (error) {
+        deletedSessionIdsRef.current.delete(backendSessionId);
         setSessionActionError(
           sanitizeApiError(error instanceof ApiError ? error.message : undefined, {
             fallback: "Could not delete this chat. Please try again.",
@@ -1485,6 +1499,7 @@ export default function ChatPage() {
                     {streamingContent ? (
                       <MarkdownMessage
                         content={streamingContent}
+                        isStreaming
                         trailing={
                           <span className="inline-block w-2 animate-pulse text-primary not-prose">█</span>
                         }

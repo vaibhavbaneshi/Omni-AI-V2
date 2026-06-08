@@ -31,6 +31,7 @@ type MarkdownMessageProps = {
   copyTargetId?: string;
   onCopy?: (content: string, id: string) => void;
   trailing?: ReactNode;
+  isStreaming?: boolean;
 };
 
 export function MarkdownMessage({
@@ -39,7 +40,17 @@ export function MarkdownMessage({
   copyTargetId,
   onCopy,
   trailing,
+  isStreaming = false,
 }: MarkdownMessageProps) {
+  if (isStreaming) {
+    return (
+      <div className={`${markdownClassName} whitespace-pre-wrap`}>
+        {content}
+        {trailing}
+      </div>
+    );
+  }
+
   return (
     <div className={markdownClassName}>
       <ReactMarkdown

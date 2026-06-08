@@ -21,6 +21,17 @@ export class ApiError extends Error {
   }
 }
 
+export class AuthExpiredError extends ApiError {
+  constructor(message = AUTH_EXPIRED_MESSAGE) {
+    super(message, 401);
+    this.name = "AuthExpiredError";
+  }
+}
+
+export function isAuthExpiredError(error: unknown): error is AuthExpiredError {
+  return error instanceof AuthExpiredError;
+}
+
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken() {
@@ -108,9 +119,10 @@ export async function apiRequest<T>(
         }
       }
       handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
+      throw new AuthExpiredError();
     }
 
-    const message = response.status === 401 ? AUTH_EXPIRED_MESSAGE : detail;
+    const message = detail;
     throw new ApiError(message, response.status, response.statusText);
   }
 
@@ -333,12 +345,29 @@ export type DocumentActionItem = {
   owner?: string | null;
 };
 
+export type DocumentTimelineEvent = {
+  date: string;
+  label: string;
+  description: string;
+  confidence?: string | null;
+};
+
+export type DocumentStructuredEntity = {
+  name: string;
+  entity_type: string;
+  mentions: number;
+  context?: string | null;
+};
+
 export type DocumentMetadataInsights = {
   keywords: string[];
   topics: string[];
   entities: string[];
   important_dates: string[];
   statistics: string[];
+  risks?: string[];
+  timeline?: DocumentTimelineEvent[];
+  structured_entities?: DocumentStructuredEntity[];
 };
 
 export type DocumentInsightPayload = {
@@ -354,6 +383,8 @@ export type DocumentInsightRecord = {
   model?: string | null;
   error_message?: string | null;
   payload?: DocumentInsightPayload | null;
+  timeline?: DocumentTimelineEvent[];
+  entities?: DocumentStructuredEntity[];
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -753,6 +784,7 @@ export type ChatStreamEvent =
   | { type: "error"; message: string }
   | { type: "cancelled"; message: string }
   | { type: "token"; content: string }
+  | { type: "formatted"; content: string }
   | { type: "title"; session_id: number; title: string }
   | { type: "done" };
 
@@ -846,13 +878,11 @@ export async function streamChat({
         }
       }
       handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
+      throw new AuthExpiredError();
     }
 
     throw new ApiError(
-      sanitizeChatError(
-        response.status === 401 ? AUTH_EXPIRED_MESSAGE : detail,
-        { status: response.status }
-      ),
+      sanitizeChatError(detail, { status: response.status }),
       response.status,
       response.statusText
     );

@@ -25,9 +25,9 @@ from app.services.rag_service import (
     stream_response
 )
 
-from app.services.conversation_service import (
-    get_chat_history
-)
+from app.services.response_formatter import format_assistant_response
+
+from app.services.conversation_service import get_chat_history
 
 from app.services.memory_summary_service import (
     generate_summary,
@@ -340,6 +340,8 @@ async def chat_stream(
             return
 
         if complete_response and not cancelled:
+            complete_response = format_assistant_response(complete_response, query=query)
+            yield json.dumps({"type": "formatted", "content": complete_response}) + "\n"
             save_message(
                 db=db,
                 session_id=session_id,

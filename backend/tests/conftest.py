@@ -33,6 +33,8 @@ from app.db.session import get_db
 from app.models import analytics  # noqa: F401 — register analytics tables
 from app.models import user_settings  # noqa: F401 — register settings tables
 from app.models import document_insight  # noqa: F401 — register document insights
+from app.models import document_timeline  # noqa: F401
+from app.models import document_entity  # noqa: F401
 from app.models import research_report  # noqa: F401 — register research reports
 from app.models import chat_folder  # noqa: F401 — register chat folders
 from app.models.chat_session import ChatSession

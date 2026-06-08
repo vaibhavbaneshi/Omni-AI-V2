@@ -34,7 +34,7 @@ def read_document_insights(
     )
     if not record:
         raise HTTPException(status_code=404, detail="Insights not found for this document.")
-    return insight_to_response(record)
+    return insight_to_response(record, db)
 
 
 @router.post("/documents/{document_id}/insights/generate", response_model=DocumentInsightGenerateResponse)

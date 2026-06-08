@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthExpiredToast } from "@/components/auth/auth-expired-toast";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -44,6 +45,7 @@ export default function RootLayout({
     >
       <body className="min-h-dvh flex flex-col bg-background app-safe-top">
         <TooltipProvider delay={300}>
+          <AuthExpiredToast />
           {children}
         </TooltipProvider>
       </body>

@@ -83,26 +83,31 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     currentSessionIdRef.current = numericSessionId;
   }, [numericSessionId]);
 
-  const refresh = useCallback(async () => {
-    if (!token || !numericSessionId) {
-      setDocuments([]);
+  const refresh = useCallback(async (sessionIdOverride?: number | null) => {
+    const scopedSessionId = sessionIdOverride ?? numericSessionId;
+    if (!token || !scopedSessionId) {
+      if (scopedSessionId === numericSessionId) {
+        setDocuments([]);
+      }
       return [];
     }
 
     const [documentResult, collectionResult] = await Promise.all([
-      listDocuments(token, { sessionId: numericSessionId }),
+      listDocuments(token, { sessionId: scopedSessionId }),
       listCollections(token),
     ]);
 
     const scopedDocuments = documentResult.documents.filter((document) =>
-      belongsToSession(document, numericSessionId)
+      belongsToSession(document, scopedSessionId)
     );
 
-    setDocuments(scopedDocuments);
-    setCollections(collectionResult.collections);
+    if (scopedSessionId === numericSessionId) {
+      setDocuments(scopedDocuments);
+      setCollections(collectionResult.collections);
 
-    if (!activeCollectionId && collectionResult.collections.length > 0) {
-      setActiveCollectionId(collectionResult.collections[0].id);
+      if (!activeCollectionId && collectionResult.collections.length > 0) {
+        setActiveCollectionId(collectionResult.collections[0].id);
+      }
     }
 
     return scopedDocuments;
@@ -272,9 +277,10 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
     setUploadTargetSessionId(targetSessionId);
     indexingStartedAtRef.current = Date.now();
+    currentSessionIdRef.current = targetSessionId;
 
-    const showProgressForTarget = currentSessionIdRef.current === targetSessionId;
-    if (showProgressForTarget) {
+    const viewingTargetSession = numericSessionId === targetSessionId;
+    if (viewingTargetSession) {
       setStatus("uploading");
       setMessage("Uploading file...");
     }
@@ -290,11 +296,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
         sessionId: targetSessionId,
       });
 
-      if (currentSessionIdRef.current !== targetSessionId) {
-        return { ...result, indexing: result.indexing ?? result.chunks_created === 0 };
-      }
-
-      const latestDocuments = await refresh();
+      const latestDocuments = await refresh(targetSessionId);
       const uploadedDocument =
         latestDocuments?.find((document) => document.id === result.document_id) ?? {
           id: result.document_id,
@@ -308,27 +310,33 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
           status: result.indexing ? ("indexing" as const) : ("ready" as const),
         };
 
-      setDocuments((current) => {
-        const scoped = current.filter(
-          (document) =>
-            belongsToSession(document, targetSessionId) && document.id !== uploadedDocument.id
-        );
-        return [uploadedDocument, ...scoped];
-      });
+      if (viewingTargetSession) {
+        setDocuments((current) => {
+          const scoped = current.filter(
+            (document) =>
+              belongsToSession(document, targetSessionId) && document.id !== uploadedDocument.id
+          );
+          return [uploadedDocument, ...scoped];
+        });
+      }
 
       if (result.indexing || uploadedDocument.chunks_created === 0) {
-        setStatus("indexing");
-        setMessage(`${result.filename}: Queued for indexing...`);
+        if (viewingTargetSession) {
+          setStatus("indexing");
+          setMessage(`${result.filename}: Queued for indexing...`);
+        }
         return { ...result, indexing: true };
       }
 
-      setStatus("success");
-      setMessage(`${result.message} (${result.chunks_created} chunks indexed)`);
-      setUploadTargetSessionId(null);
-      indexingStartedAtRef.current = null;
+      if (viewingTargetSession) {
+        setStatus("success");
+        setMessage(`${result.message} (${result.chunks_created} chunks indexed)`);
+        setUploadTargetSessionId(null);
+        indexingStartedAtRef.current = null;
+      }
       return result;
     } catch (error) {
-      if (currentSessionIdRef.current === targetSessionId) {
+      if (numericSessionId === targetSessionId) {
         setStatus("error");
         setMessage(
           sanitizeApiError(error instanceof ApiError ? error.message : undefined, {

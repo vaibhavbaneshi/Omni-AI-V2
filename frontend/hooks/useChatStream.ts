@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { sanitizeChatError } from "@/lib/user-facing-errors";
 import {
   ApiError,
+  AuthExpiredError,
   streamChat,
   type ChatStreamEvent,
   type StreamMeta,
@@ -107,6 +108,12 @@ export function useChatStream() {
           if (event.type === "token") {
             contentRef.current += event.content;
             setStreamingContent((current) => current + event.content);
+            return;
+          }
+
+          if (event.type === "formatted") {
+            contentRef.current = event.content;
+            setStreamingContent(event.content);
           }
         },
       });
@@ -137,13 +144,15 @@ export function useChatStream() {
         console.error("streamChat error:", error);
       }
 
-      const message =
-        error instanceof ApiError && error.status === 401
-          ? sanitizeChatError(error.message, { status: 401 })
-          : sanitizeChatError(
-              error instanceof Error ? error.message : undefined,
-              error instanceof ApiError ? { status: error.status } : undefined
-            );
+      if (error instanceof AuthExpiredError || (error instanceof ApiError && error.status === 401)) {
+        setStreamError(null);
+        throw error;
+      }
+
+      const message = sanitizeChatError(
+        error instanceof Error ? error.message : undefined,
+        error instanceof ApiError ? { status: error.status } : undefined
+      );
 
       setStreamError(message);
       throw error;

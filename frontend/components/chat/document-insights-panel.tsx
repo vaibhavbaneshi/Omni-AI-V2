@@ -185,6 +185,43 @@ export function DocumentInsightsPanel({
             </section>
           )}
 
+          {(insights.timeline?.length ?? 0) > 0 && (
+            <section>
+              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                Timeline
+              </h3>
+              <div className="space-y-2">
+                {insights.timeline!.map((event) => (
+                  <div key={`${event.date}-${event.label}`} className="rounded-lg border border-white/5 px-2.5 py-2">
+                    <p className="text-[11px] font-medium text-primary/90">{event.date || "Undated"}</p>
+                    <p className="text-[12px] font-medium text-foreground/90">{event.label}</p>
+                    <p className="mt-0.5 text-[12px] text-muted-foreground/80">{event.description}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {(insights.entities?.length ?? 0) > 0 && (
+            <section>
+              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                Key Entities
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {insights.entities!.map((entity) => (
+                  <span
+                    key={`${entity.name}-${entity.entity_type}`}
+                    className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-muted-foreground"
+                    title={entity.context || undefined}
+                  >
+                    {entity.name}
+                    <span className="ml-1 text-muted-foreground/50">· {entity.entity_type}</span>
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
+
           <section>
             <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">
               Document Insights
