@@ -53,63 +53,69 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     import threading
 
+    from starlette.concurrency import run_in_threadpool
+
     app.state.ready = False
     app.state.startup_error = None
+    settings = get_settings()
 
-    def _startup() -> None:
-        try:
-            settings = get_settings()
-            settings.validate_for_runtime()
-            configure_langsmith_env(settings)
-            log_startup_diagnostics(settings)
+    try:
+        settings.validate_for_runtime()
+        configure_langsmith_env(settings)
+        log_startup_diagnostics(settings)
 
-            run_migrations()
-            app.state.migrations = migration_status()
+        # Idempotent if railway_migrate.sh already ran; required for local/dev uvicorn.
+        await run_in_threadpool(run_migrations)
+        app.state.migrations = await run_in_threadpool(migration_status)
+        if not app.state.migrations.get("up_to_date", True):
+            raise RuntimeError(
+                f"Database schema is behind application code: {app.state.migrations}"
+            )
 
-            startup = run_startup_checks()
-            logger.info("Startup complete: %s", startup.get("status"))
-            if settings.INGEST_IN_BACKGROUND:
-                if settings.ingest_uses_rq_queue:
-                    from app.services.ingestion_queue import get_active_worker_count
+        startup = await run_in_threadpool(run_startup_checks)
+        logger.info("Startup complete: %s", startup.get("status"))
+        if settings.INGEST_IN_BACKGROUND:
+            if settings.ingest_uses_rq_queue:
+                from app.services.ingestion_queue import get_active_worker_count
 
-                    worker_count = get_active_worker_count()
-                    logger.info(
-                        "Document indexing: RQ queue (INGEST_QUEUE_ENABLED=true, redis=%s, workers=%s)",
-                        settings.redis_url.split("@")[-1] if settings.redis_url else "unset",
-                        worker_count,
-                    )
-                    if worker_count == 0:
-                        logger.error(
-                            "No RQ ingestion workers connected — uploads will stay queued. "
-                            "Ensure scripts/railway_web_and_worker.sh runs in this container."
-                        )
-                else:
-                    logger.info(
-                        "Document indexing: in-process BackgroundTasks (INGEST_QUEUE_ENABLED=false)."
+                worker_count = get_active_worker_count()
+                logger.info(
+                    "Document indexing: RQ queue (INGEST_QUEUE_ENABLED=true, redis=%s, workers=%s)",
+                    settings.redis_url.split("@")[-1] if settings.redis_url else "unset",
+                    worker_count,
+                )
+                if worker_count == 0:
+                    logger.error(
+                        "No RQ ingestion workers connected — uploads will stay queued. "
+                        "Ensure scripts/railway_web_and_worker.sh runs in this container."
                     )
             else:
-                logger.info("Document indexing: synchronous (INGEST_IN_BACKGROUND=false)")
-            if settings.EMBEDDING_PROVIDER == "local":
-                logger.warning(
-                    "EMBEDDING_PROVIDER=local loads PyTorch in-process — use huggingface on Railway."
+                logger.info(
+                    "Document indexing: in-process BackgroundTasks (INGEST_QUEUE_ENABLED=false)."
                 )
-            if settings.PRELOAD_EMBEDDING_MODEL and settings.EMBEDDING_PROVIDER == "local":
-                threading.Thread(
-                    target=lambda: __import__(
-                        "app.services.embedding_service",
-                        fromlist=["preload_embedding_model"],
-                    ).preload_embedding_model(),
-                    name="embedding-preload",
-                    daemon=True,
-                ).start()
-            app.state.ready = True
-        except Exception as exc:
-            app.state.startup_error = str(exc)
-            logger.critical("Startup failed: %s", exc, exc_info=exc)
+        else:
+            logger.info("Document indexing: synchronous (INGEST_IN_BACKGROUND=false)")
+        if settings.EMBEDDING_PROVIDER == "local":
+            logger.warning(
+                "EMBEDDING_PROVIDER=local loads PyTorch in-process — use huggingface on Railway."
+            )
+        if settings.PRELOAD_EMBEDDING_MODEL and settings.EMBEDDING_PROVIDER == "local":
+            threading.Thread(
+                target=lambda: __import__(
+                    "app.services.embedding_service",
+                    fromlist=["preload_embedding_model"],
+                ).preload_embedding_model(),
+                name="embedding-preload",
+                daemon=True,
+            ).start()
+        app.state.ready = True
+    except Exception as exc:
+        app.state.startup_error = str(exc)
+        logger.critical("Startup failed: %s", exc, exc_info=exc)
+        raise
 
-    threading.Thread(target=_startup, name="app-startup", daemon=True).start()
     logger.info(
-        "Accepting HTTP on PORT=%s — full startup continues in background (GET /health/live)",
+        "Application ready on PORT=%s (GET /health/ready)",
         os.environ.get("PORT", "8000"),
     )
     yield

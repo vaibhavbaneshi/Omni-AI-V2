@@ -1,6 +1,9 @@
 #!/bin/sh
 # Run API + RQ worker in one Railway service (shared /data volume + filesystem).
+set -e
 cd /app/backend
+
+sh /app/backend/scripts/railway_migrate.sh
 
 worker_supervisor() {
   while true; do

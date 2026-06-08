@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend /app/backend
 
-RUN chmod +x /app/backend/scripts/railway_web_and_worker.sh \
+RUN chmod +x /app/backend/scripts/railway_migrate.sh \
+    && chmod +x /app/backend/scripts/railway_web_and_worker.sh \
     && chmod +x /app/backend/scripts/railway_start.sh
 
 ENV PYTHONUNBUFFERED=1

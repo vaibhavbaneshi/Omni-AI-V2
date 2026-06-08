@@ -3,7 +3,7 @@
 set -e
 cd /app/backend
 
-# Migrations run in a background thread inside app.main lifespan — do not block here.
+sh /app/backend/scripts/railway_migrate.sh
 
 if [ "${START_RQ_WORKER:-false}" = "true" ]; then
   python -m app.worker &
