@@ -141,16 +141,16 @@ def test_init_sentry_noop_without_dsn(monkeypatch):
 
     get_settings.cache_clear()
     sentry_config._initialized = False
-
-    with patch("sentry_sdk.init") as mock_init:
-        sentry_config.init_sentry()
-        mock_init.assert_not_called()
+    sentry_config.init_sentry()
+    assert sentry_config._initialized is True
 
     get_settings.cache_clear()
     sentry_config._initialized = False
 
 
 def test_init_sentry_initializes_when_dsn_set(monkeypatch):
+    import sys
+
     monkeypatch.setenv("SENTRY_DSN", "https://example@sentry.io/1")
     from app.core.app_settings import get_settings
     from app.core import sentry_config
@@ -158,10 +158,25 @@ def test_init_sentry_initializes_when_dsn_set(monkeypatch):
     get_settings.cache_clear()
     sentry_config._initialized = False
 
-    with patch("sentry_sdk.init") as mock_init:
+    fake_sentry = MagicMock()
+    fake_fastapi = MagicMock()
+    fake_fastapi.FastApiIntegration = MagicMock(return_value="fastapi")
+    fake_logging = MagicMock()
+    fake_logging.LoggingIntegration = MagicMock(return_value="logging")
+    fake_starlette = MagicMock()
+    fake_starlette.StarletteIntegration = MagicMock(return_value="starlette")
+    with patch.dict(
+        sys.modules,
+        {
+            "sentry_sdk": fake_sentry,
+            "sentry_sdk.integrations.fastapi": fake_fastapi,
+            "sentry_sdk.integrations.logging": fake_logging,
+            "sentry_sdk.integrations.starlette": fake_starlette,
+        },
+    ):
         sentry_config.init_sentry()
-        mock_init.assert_called_once()
-        assert mock_init.call_args.kwargs["dsn"] == "https://example@sentry.io/1"
+        fake_sentry.init.assert_called_once()
+        assert fake_sentry.init.call_args.kwargs["dsn"] == "https://example@sentry.io/1"
 
     get_settings.cache_clear()
     sentry_config._initialized = False

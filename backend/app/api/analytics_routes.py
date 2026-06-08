@@ -9,6 +9,7 @@ from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.services.analytics_service import get_platform_overview, get_user_overview
+from app.services.redis_cache_service import cache_metrics
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -60,3 +61,12 @@ def analytics_rag(
 
     overview = get_platform_overview(db, days=days)
     return {"period_days": days, "rag": overview["rag"], "ai": {"avg_latency_ms": overview["ai"]["avg_latency_ms"]}}
+
+
+@router.get("/cache")
+def analytics_cache_metrics(
+    current_user: User = Depends(get_current_user),
+):
+    if not user_has_admin_access(current_user):
+        raise HTTPException(status_code=403, detail="Cache metrics require admin access.")
+    return cache_metrics()

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DocumentInsightsPanel } from "@/components/chat/document-insights-panel";
+import { GitHubConnectorPanel } from "@/components/chat/github-connector-panel";
 import { KnowledgeGraphPanel } from "@/components/chat/knowledge-graph-panel";
 import { WorkspaceCollectionsPanel } from "@/components/chat/workspace-collections-panel";
 import type {
@@ -23,7 +24,7 @@ import type {
 } from "@/lib/api";
 import { indexingStageLabel } from "@/lib/api";
 
-export type WorkspaceContextTab = "files" | "collections" | "insights" | "graph";
+export type WorkspaceContextTab = "files" | "collections" | "insights" | "graph" | "connectors";
 
 type WorkspaceContextSheetProps = {
   token?: string | null;
@@ -50,6 +51,7 @@ type WorkspaceContextSheetProps = {
   onOpenChange?: (open: boolean) => void;
   defaultTab?: WorkspaceContextTab;
   showTrigger?: boolean;
+  sessionId?: number | null;
 };
 
 export function WorkspaceContextSheet({
@@ -77,6 +79,7 @@ export function WorkspaceContextSheet({
   onOpenChange,
   defaultTab = "files",
   showTrigger = true,
+  sessionId = null,
 }: WorkspaceContextSheetProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [tab, setTab] = useState<WorkspaceContextTab>(defaultTab);
@@ -140,6 +143,9 @@ export function WorkspaceContextSheet({
               </TabsTrigger>
               <TabsTrigger value="graph" className="h-8 gap-1 px-0 text-[12px]">
                 Graph
+              </TabsTrigger>
+              <TabsTrigger value="connectors" className="h-8 gap-1 px-0 text-[12px]">
+                GitHub
               </TabsTrigger>
             </TabsList>
           </div>
@@ -260,6 +266,10 @@ export function WorkspaceContextSheet({
                 token={token}
                 documentId={activeDocumentId}
               />
+            </TabsContent>
+
+            <TabsContent value="connectors" className="px-4 py-4">
+              <GitHubConnectorPanel embedded token={token} sessionId={sessionId} />
             </TabsContent>
           </ScrollArea>
         </Tabs>

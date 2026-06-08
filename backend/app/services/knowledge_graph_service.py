@@ -295,6 +295,13 @@ def graph_rag_context(
     limit: int = 8,
 ) -> str:
     """Return graph neighborhood text for RAG prompts."""
+    from app.services.redis_cache_service import cache_query_result, get_query_cache
+
+    cache_key = f"{workspace_id}|{limit}|{query}"
+    cached = get_query_cache("graph_rag", cache_key, user_id)
+    if cached is not None:
+        return cached
+
     import networkx as nx
 
     graph_data = get_global_graph(db, user_id=user_id, workspace_id=workspace_id, limit=200)
@@ -334,7 +341,9 @@ def graph_rag_context(
         if neighbor_labels:
             line += ": " + "; ".join(neighbor_labels)
         lines.append(line)
-    return "\n".join(lines)
+    result = "\n".join(lines)
+    cache_query_result("graph_rag", cache_key, user_id, result)
+    return result
 
 
 def _serialize_node(node: GraphNode) -> dict[str, Any]:

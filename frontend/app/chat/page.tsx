@@ -1635,6 +1635,11 @@ export default function ChatPage() {
                   open={workspaceSheetOpen}
                   onOpenChange={setWorkspaceSheetOpen}
                   defaultTab={workspaceSheetTab}
+                  sessionId={
+                    activeChat && isBackendSessionId(activeChat.id)
+                      ? Number(activeChat.id)
+                      : null
+                  }
                 />
               </div>
               {documents.length > 0 && (

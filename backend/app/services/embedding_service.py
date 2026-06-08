@@ -237,6 +237,43 @@ def encode_texts(
     if not texts:
         return []
 
+    from app.services.redis_cache_service import cache_embedding, get_embedding_cache
+
+    results: list[list[float] | None] = [None] * len(texts)
+    pending_indices: list[int] = []
+    pending_texts: list[str] = []
+    for index, text in enumerate(texts):
+        cached = get_embedding_cache(text)
+        if cached is not None:
+            results[index] = cached
+        else:
+            pending_indices.append(index)
+            pending_texts.append(text)
+
+    if pending_texts:
+        encoded = _encode_texts_uncached(
+            pending_texts,
+            telemetry=telemetry,
+            batch_index=batch_index,
+            batch_total=batch_total,
+        )
+        for index, text, vector in zip(pending_indices, pending_texts, encoded):
+            cache_embedding(text, vector)
+            results[index] = vector
+
+    return [vector for vector in results if vector is not None]
+
+
+def _encode_texts_uncached(
+    texts: list[str],
+    *,
+    telemetry=None,
+    batch_index: int | None = None,
+    batch_total: int | None = None,
+) -> list[list[float]]:
+    if not texts:
+        return []
+
     settings = get_settings()
     provider = settings.EMBEDDING_PROVIDER
     model_label = settings.embedding_model_label

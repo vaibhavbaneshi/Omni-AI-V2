@@ -364,4 +364,17 @@ def report_to_response(record: ResearchReport) -> dict[str, Any]:
 
 
 def run_research_agent(**kwargs) -> dict[str, Any]:
-    return ResearchAgent().run(**kwargs)
+    from app.services.redis_cache_service import cache_query_result, get_query_cache
+
+    query = kwargs.get("query", "")
+    user_id = kwargs.get("user_id")
+    cache_key = query.strip().lower()
+    if cache_key and user_id is not None:
+        cached = get_query_cache("research", cache_key, user_id)
+        if cached is not None:
+            return cached
+
+    result = ResearchAgent().run(**kwargs)
+    if cache_key and user_id is not None and result.get("report_id"):
+        cache_query_result("research", cache_key, user_id, result, ttl_seconds=900)
+    return result
