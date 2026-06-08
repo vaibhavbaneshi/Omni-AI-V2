@@ -12,6 +12,7 @@ from app.services.attachment_service import (
     needs_calculator,
     session_has_documents,
 )
+from app.services.conversation_heuristics import is_simple_conversational_query
 from app.services.multi_document_service import is_multi_document_query
 from app.agent.document_analysis_agent import is_document_analysis_request
 from app.tools.calculator import calculator_tool
@@ -132,6 +133,15 @@ class AgentOrchestrator:
                 tools=["calculator", "memory"],
                 reason="The request includes a numeric calculation.",
                 confidence=0.95,
+                mode=mode,
+            )
+
+        if is_simple_conversational_query(query):
+            return AgentRoute(
+                strategy="direct-chat",
+                tools=[],
+                reason="Short conversational message — no retrieval or web search needed.",
+                confidence=0.99,
                 mode=mode,
             )
 

@@ -19,6 +19,7 @@ type WorkspaceCollectionsPanelProps = {
   documents: Array<{ id: number; filename: string; collection_id?: number }>;
   onRefresh: () => Promise<unknown>;
   onSelectCollection: (collectionId: number) => void;
+  embedded?: boolean;
 };
 
 export function WorkspaceCollectionsPanel({
@@ -28,6 +29,7 @@ export function WorkspaceCollectionsPanel({
   documents,
   onRefresh,
   onSelectCollection,
+  embedded = false,
 }: WorkspaceCollectionsPanelProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -83,11 +85,11 @@ export function WorkspaceCollectionsPanel({
   }
 
   return (
-    <div className="mb-3 rounded-xl border border-white/5 bg-white/[0.015] px-3 py-3">
+    <div className={embedded ? "space-y-3" : "mb-3 rounded-xl border border-white/5 bg-white/[0.015] px-3 py-3"}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/60">
+        <div className={`flex items-center gap-2 font-medium text-muted-foreground/60 ${embedded ? "text-[12px]" : "text-[11px] uppercase tracking-wide"}`}>
           <FolderPlus className="size-3.5" />
-          Collections
+          {embedded ? "Organize files into collections" : "Collections"}
         </div>
         <Button
           type="button"

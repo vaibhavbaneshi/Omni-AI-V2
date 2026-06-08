@@ -36,14 +36,10 @@ import {
   Star,
   Clock,
   Command,
-  Database,
   Loader2,
   X,
   File as FileIcon,
   UploadCloud,
-  Wrench,
-  ShieldCheck,
-  BookOpen,
   AlertCircle,
   PenLine,
   BarChart3,
@@ -72,7 +68,6 @@ import {
   type WorkspaceSearchResult,
   indexingStageLabel,
   type StreamMeta,
-  type StreamSource,
 } from "@/lib/api";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useModels } from "@/hooks/useModels";
@@ -115,8 +110,12 @@ import {
   SelectGroup,
 } from "@/components/ui/select";
 import { MarkdownMessage } from "@/components/chat/markdown-message";
-import { DocumentInsightsPanel } from "@/components/chat/document-insights-panel";
-import { WorkspaceCollectionsPanel } from "@/components/chat/workspace-collections-panel";
+import { MessageContextBar } from "@/components/chat/message-context-bar";
+import type { SourceCitation } from "@/components/chat/sources-panel";
+import {
+  WorkspaceContextSheet,
+  type WorkspaceContextTab,
+} from "@/components/chat/workspace-context-sheet";
 import { WorkspaceSearchResults } from "@/components/chat/workspace-search-results";
 import { useDocumentInsights } from "@/hooks/useDocumentInsights";
 
@@ -131,9 +130,6 @@ type Message = {
   status?: "complete" | "error";
 };
 
-type SourceCitation = StreamSource & {
-  url?: string;
-};
 
 type Chat = {
   id: string;
@@ -232,6 +228,8 @@ export default function ChatPage() {
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "up" | "down">>({});
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [insightDocumentId, setInsightDocumentId] = useState<number | null>(null);
+  const [workspaceSheetOpen, setWorkspaceSheetOpen] = useState(false);
+  const [workspaceSheetTab, setWorkspaceSheetTab] = useState<WorkspaceContextTab>("files");
   const {
     documents,
     readyDocuments,
@@ -1383,8 +1381,11 @@ export default function ChatPage() {
                       </div>
                     ) : (
                       <div className="group">
-                        <ToolVisibility meta={message.toolMeta} memoryFacts={memoryFacts} />
-                        <SourcesPanel sources={message.sources || []} />
+                        <MessageContextBar
+                          meta={message.toolMeta}
+                          sources={message.sources || []}
+                          memoryFacts={memoryFacts}
+                        />
 
                         {/* Message Content */}
                         <MarkdownMessage
@@ -1475,8 +1476,12 @@ export default function ChatPage() {
                     animate="animate"
                     className="group"
                   >
-                    <ToolVisibility meta={streamingMeta || undefined} memoryFacts={memoryFacts} live />
-                    <SourcesPanel sources={streamingMeta?.sources || []} compact />
+                    <MessageContextBar
+                      meta={streamingMeta || undefined}
+                      sources={streamingMeta?.sources || []}
+                      memoryFacts={memoryFacts}
+                      live
+                    />
                     {streamingContent ? (
                       <MarkdownMessage
                         content={streamingContent}
@@ -1562,7 +1567,7 @@ export default function ChatPage() {
             )}
 
             <div
-              className={`mb-3 rounded-xl border border-dashed px-3 py-3 transition-all ${isDraggingFile
+              className={`mb-3 rounded-xl border border-dashed px-3 py-2.5 transition-all ${isDraggingFile
                   ? "border-primary/50 bg-primary/10"
                   : "border-white/10 bg-white/[0.015]"
                 }`}
@@ -1573,77 +1578,84 @@ export default function ChatPage() {
               onDragLeave={() => setIsDraggingFile(false)}
               onDrop={handleDrop}
             >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <button
                   type="button"
-                  className="flex min-w-0 items-center gap-3 text-left"
+                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                   onClick={handleAttachmentClick}
                   disabled={isUploadActiveForSession}
                 >
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-[#050505]">
-                    {isUploadActiveForSession ? (
-                      <Loader2 className="size-4 animate-spin text-primary" />
-                    ) : (
-                      <UploadCloud className="size-4 text-primary" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[12px] font-medium text-foreground/85">
-                      Drop files to attach to this chat
-                    </p>
-                    <p className="truncate text-[11px] text-muted-foreground/55">
-                      {documents.length > 0
-                        ? `${readyDocuments.length} ready${indexingDocuments.length > 0 ? ` · ${indexingDocuments.length} indexing` : ""}`
-                        : `Supported: ${SUPPORTED_UPLOADS_LABEL}. Files are scoped to this conversation.`}
-                    </p>
-                  </div>
+                  {isUploadActiveForSession ? (
+                    <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+                  ) : (
+                    <UploadCloud className="size-4 shrink-0 text-primary" />
+                  )}
+                  <span className="truncate text-[12px] text-muted-foreground/70">
+                    {documents.length > 0
+                      ? `${readyDocuments.length} file${readyDocuments.length === 1 ? "" : "s"} in workspace`
+                      : `Drop files or attach · ${SUPPORTED_UPLOADS_LABEL}`}
+                  </span>
                 </button>
-                <div className="flex flex-wrap gap-1.5">
-                  {indexingDocuments.slice(0, 3).map((document) => (
-                    <DocumentChip
-                      key={`indexing-${document.id}`}
-                      document={document}
-                      indexing
-                    />
+                <WorkspaceContextSheet
+                  token={session?.token}
+                  collections={collections}
+                  activeCollectionId={activeCollectionId}
+                  documents={documents}
+                  readyDocuments={readyDocuments}
+                  indexingDocuments={indexingDocuments}
+                  activeDocumentId={insightDocumentId}
+                  insightDocument={insightDocument}
+                  documentInsights={documentInsights}
+                  insightsLoading={insightsLoading}
+                  insightsGenerating={insightsGenerating}
+                  insightsError={insightsError}
+                  onRefresh={refreshDocuments}
+                  onSelectCollection={setActiveCollectionId}
+                  onSelectDocument={setInsightDocumentId}
+                  onGenerateInsights={generateDocumentInsightsForChat}
+                  onDeleteDocument={handleDeleteDocument}
+                  deletingDocumentId={deletingDocumentId}
+                  onAttachClick={handleAttachmentClick}
+                  uploadBusy={isUploadActiveForSession}
+                  open={workspaceSheetOpen}
+                  onOpenChange={setWorkspaceSheetOpen}
+                  defaultTab={workspaceSheetTab}
+                />
+              </div>
+              {documents.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5 border-t border-white/5 pt-2">
+                  {indexingDocuments.slice(0, 2).map((document) => (
+                    <DocumentChip key={`indexing-${document.id}`} document={document} indexing />
                   ))}
-                  {readyDocuments.slice(0, 3).map((document) => (
+                  {readyDocuments.slice(0, 2).map((document) => (
                     <DocumentChip
                       key={document.id}
                       document={document}
                       active={insightDocumentId === document.id}
                       deleting={deletingDocumentId === document.id}
-                      onSelect={() => setInsightDocumentId(document.id)}
+                      onSelect={() => {
+                        setInsightDocumentId(document.id);
+                        setWorkspaceSheetTab("insights");
+                        setWorkspaceSheetOpen(true);
+                      }}
                       onDelete={() => handleDeleteDocument(document.id, document.filename)}
                     />
                   ))}
-                  {documents.length > 3 && (
-                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-muted-foreground">
-                      +{documents.length - 3}
-                    </span>
+                  {documents.length > 2 && (
+                    <button
+                      type="button"
+                      className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setWorkspaceSheetTab("files");
+                        setWorkspaceSheetOpen(true);
+                      }}
+                    >
+                      +{documents.length - 2} more
+                    </button>
                   )}
                 </div>
-              </div>
+              )}
             </div>
-
-            <WorkspaceCollectionsPanel
-              token={session?.token}
-              collections={collections}
-              activeCollectionId={activeCollectionId}
-              documents={documents}
-              onRefresh={refreshDocuments}
-              onSelectCollection={setActiveCollectionId}
-            />
-
-            {insightDocument && (
-              <DocumentInsightsPanel
-                document={insightDocument}
-                insights={documentInsights}
-                loading={insightsLoading}
-                generating={insightsGenerating}
-                error={insightsError}
-                onGenerate={generateDocumentInsightsForChat}
-              />
-            )}
 
             {(attachedFile || uploadMessage) && (
               <div className="mb-2 space-y-1 px-1">
@@ -1731,233 +1743,6 @@ export default function ChatPage() {
         </div>
       </div>
     </div>
-  );
-}
-
-function ToolVisibility({
-  meta,
-  memoryFacts,
-  live = false,
-}: {
-  meta?: StreamMeta | null;
-  memoryFacts: string[];
-  live?: boolean;
-}) {
-  const tool = meta?.tool || "rag";
-  const toolLabel =
-    tool === "calculator" || meta?.route?.tools?.includes("calculator")
-      ? "Calculator"
-      : meta?.route?.tools?.includes("web_search")
-        ? meta?.route?.tools?.includes("vector_retrieval")
-          ? "Web + documents"
-          : "Web search"
-        : tool === "web_search"
-          ? "Web search"
-          : "Document search";
-
-  return (
-    <div className="mb-4 flex flex-wrap items-center gap-2">
-      <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
-        {live ? <Loader2 className="size-3.5 animate-spin text-primary" /> : <Wrench className="size-3.5 text-primary" />}
-        <span>{live ? "Using" : "Used"} {toolLabel}</span>
-      </div>
-      {meta?.strategy && (
-        <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
-          <Database className="size-3.5 text-blue-400" />
-          <span>{meta.strategy}</span>
-        </div>
-      )}
-      {meta?.route?.status && (
-        <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
-          <Search className="size-3.5 text-cyan-300" />
-          <span>Search {meta.route.status}</span>
-        </div>
-      )}
-      {meta?.agent === "research" && meta?.report_id && (
-        <div className="flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-3 py-1.5 text-[11px] font-medium text-violet-200 shadow-inner">
-          <FlaskConical className="size-3.5" />
-          <span>Research report #{meta.report_id}</span>
-        </div>
-      )}
-      {meta?.agent === "document-analysis" && (
-        <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-200 shadow-inner">
-          <FileText className="size-3.5" />
-          <span>
-            Document analysis
-            {meta.document_analysis?.length ? ` (${meta.document_analysis.length})` : ""}
-          </span>
-        </div>
-      )}
-      {meta?.mode && (
-        <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
-          <Sparkles className="size-3.5 text-violet-300" />
-          <span>{meta.mode} mode</span>
-        </div>
-      )}
-      <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-muted-foreground/80 shadow-inner">
-        <ShieldCheck className="size-3.5 text-emerald-300" />
-        <span>
-          Memory {meta?.memory?.conversation_history || memoryFacts.length > 0 ? "available" : "ready"}
-        </span>
-      </div>
-      {memoryFacts.slice(0, 2).map((fact) => (
-        <span
-          key={fact}
-          className="rounded-full border border-primary/15 bg-primary/5 px-2.5 py-1 text-[10px] font-medium text-primary/90"
-        >
-          {fact}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function SourcesPanel({
-  sources,
-  compact = false,
-}: {
-  sources: SourceCitation[];
-  compact?: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  if (sources.length === 0) return null;
-
-  const webSources = sources.filter((source) => source.type === "web");
-  const memorySources = sources.filter((source) => source.type === "memory");
-  const documentSources = sources.filter((source) => source.type !== "web" && source.type !== "memory");
-
-  return (
-    <div className={compact ? "mb-4" : "mb-6"}>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/60">
-          <BookOpen className="size-3" />
-          Sources used
-          {webSources.length > 0 && (
-            <span className="rounded-full bg-cyan-400/10 px-1.5 py-0.5 text-[9px] text-cyan-200">
-              {webSources.length} web
-            </span>
-          )}
-          {documentSources.length > 0 && (
-            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] text-primary">
-              {documentSources.length} docs
-            </span>
-          )}
-          {memorySources.length > 0 && (
-            <span className="rounded-full bg-emerald-400/10 px-1.5 py-0.5 text-[9px] text-emerald-200">
-              {memorySources.length} memory
-            </span>
-          )}
-        </p>
-        <button
-          type="button"
-          className="text-[11px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? "Hide chunks" : "View chunks"}
-        </button>
-      </div>
-      <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-thin">
-        {sources.map((source, index) => (
-          <SourceCard key={`${source.source}-${index}`} source={source} index={index} />
-        ))}
-      </div>
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="mt-2 space-y-2">
-              {[
-                { label: "Workspace documents", items: documentSources },
-                { label: "Live web", items: webSources },
-                { label: "Memory", items: memorySources },
-              ].map((group) => group.items.length > 0 && (
-                <div key={group.label} className="space-y-2">
-                  <p className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/45">
-                    {group.label}
-                  </p>
-                  {group.items.map((source, index) => (
-                    <div
-                      key={`${source.source}-chunk-${index}`}
-                      className="rounded-xl border border-white/5 bg-[#050505] p-3 shadow-inner"
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-3 text-[10px] text-muted-foreground/55">
-                        <span className="truncate font-medium">{source.title || source.source}</span>
-                        {typeof source.score === "number" && <span>{Math.round(source.score * 100)}% match</span>}
-                      </div>
-                      <p className="line-clamp-5 text-[12px] leading-relaxed text-muted-foreground/80">
-                        {source.chunk}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function SourceCard({
-  source,
-  index,
-}: {
-  source: SourceCitation;
-  index: number;
-}) {
-  const metadata = source.metadata || {};
-  const citationId = typeof metadata.citation_id === "string" ? metadata.citation_id : `S${index + 1}`;
-  const pageNumber =
-    typeof metadata.page_number === "number" || typeof metadata.page_number === "string"
-      ? metadata.page_number
-      : null;
-  const chunkId = typeof metadata.chunk_id === "string" ? metadata.chunk_id : null;
-  const sourceReference =
-    typeof metadata.source_reference === "string" ? metadata.source_reference : null;
-
-  const body = (
-    <div className="group/source flex w-[190px] shrink-0 flex-col justify-between gap-2 rounded-xl border border-white/5 bg-[#050505] px-3 py-2.5 shadow-inner transition-colors hover:bg-white/[0.03]">
-      <div className="flex items-center gap-2">
-        <div className="flex size-5 shrink-0 items-center justify-center rounded-md bg-white/10">
-          {source.type === "web" ? (
-            <Globe className="size-3 text-cyan-200 transition-colors group-hover/source:text-foreground" />
-          ) : source.type === "memory" ? (
-            <Brain className="size-3 text-emerald-200 transition-colors group-hover/source:text-foreground" />
-          ) : (
-            <FileText className="size-3 text-primary transition-colors group-hover/source:text-foreground" />
-          )}
-        </div>
-        <span className="truncate text-[10px] text-muted-foreground/60">
-          [{citationId}] {source.source || source.title || `Source ${index + 1}`}
-        </span>
-      </div>
-      <span className="line-clamp-2 text-[12px] font-medium leading-snug text-foreground/85 transition-colors group-hover/source:text-foreground">
-        {source.title || source.source || `Retrieved chunk ${index + 1}`}
-      </span>
-      {(sourceReference || pageNumber || chunkId) && (
-        <span className="truncate text-[10px] text-muted-foreground/45">
-          {sourceReference || `${pageNumber ? `Page ${pageNumber}` : ""}${pageNumber && chunkId ? " · " : ""}${chunkId ? `Chunk ${chunkId}` : ""}`}
-        </span>
-      )}
-      <div className="flex items-center justify-between text-[10px] text-muted-foreground/45">
-        <span>{source.type === "web" ? "live web" : source.type === "memory" ? "memory" : source.strategy || "retrieval"}</span>
-        {typeof source.score === "number" && <span>{Math.round(source.score * 100)}%</span>}
-      </div>
-    </div>
-  );
-
-  if (!source.url) return body;
-
-  return (
-    <a href={source.url} target="_blank" rel="noopener noreferrer">
-      {body}
-    </a>
   );
 }
 

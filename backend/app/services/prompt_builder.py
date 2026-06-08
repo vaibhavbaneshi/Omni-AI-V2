@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from app.services.conversation_heuristics import is_simple_conversational_query
+
 _CODING_HINTS = re.compile(
     r"\b(code|boilerplate|component|react|typescript|javascript|python|function|api|snippet|implement|refactor|debug)\b",
     re.I,
@@ -180,6 +182,24 @@ def build_stream_prompt(
     document_summary: bool = False,
     multi_document: bool = False,
 ) -> str:
+    if is_simple_conversational_query(query):
+        blocks: list[str] = []
+        if history.strip():
+            blocks.append(f"Recent conversation:\n{history.strip()}")
+        if summary.strip():
+            blocks.append(f"Conversation memory:\n{summary.strip()}")
+        context_section = "\n\n".join(blocks) if blocks else ""
+        memory_block = f"\n\n{context_section}" if context_section else ""
+        return f"""You are Omni AI — friendly, concise, and natural.
+
+Reply in 1-2 short sentences. No headings, bullet lists, web citations, or structured report sections.
+Do not search the web or invent sources for greetings and small talk.
+{memory_block}
+
+USER: {query.strip()}
+
+ASSISTANT:"""
+
     effective_mode = "coding" if looks_like_coding_request(query, mode) else mode
 
     mode_instructions = {

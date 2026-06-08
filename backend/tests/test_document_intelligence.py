@@ -26,6 +26,45 @@ SAMPLE_PAYLOAD = {
 }
 
 
+def test_load_document_text_falls_back_to_indexed_chunks(db_session, monkeypatch):
+    from app.models.document import DocumentCollection, DocumentRecord
+    from app.services.document_intelligence_service import _load_document_text
+
+    user = UserFactory()
+    collection = DocumentCollection(user_id=user.id, workspace_id="default", name="Default")
+    db_session.add(collection)
+    db_session.commit()
+
+    document = DocumentRecord(
+        user_id=user.id,
+        workspace_id="default",
+        collection_id=collection.id,
+        filename="report.docx",
+        storage_path="/data/uploads/missing/report.docx",
+        file_size=128,
+        chunks_created=2,
+        indexing_stage="ready",
+    )
+    db_session.add(document)
+    db_session.commit()
+
+    class FakeCollection:
+        def get(self, **_kwargs):
+            return {
+                "documents": ["Chunk one text.", "Chunk two text."],
+                "metadatas": [{"chunk_index": 0}, {"chunk_index": 1}],
+            }
+
+    monkeypatch.setattr(
+        "app.services.documents_services.get_document_collection",
+        lambda: FakeCollection(),
+    )
+
+    text = _load_document_text(db_session, document)
+    assert "Chunk one text." in text
+    assert "Chunk two text." in text
+
+
 @patch("app.services.document_intelligence_service._load_document_text")
 @patch("app.services.document_intelligence_service.invoke_generate")
 def test_generate_document_insights_persists_payload(

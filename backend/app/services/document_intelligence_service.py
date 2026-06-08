@@ -92,13 +92,54 @@ DOCUMENT TEXT:
 JSON:"""
 
 
-def _load_document_text(document: DocumentRecord) -> str:
-    if not document.storage_path or not os.path.exists(document.storage_path):
-        raise FileNotFoundError("Document file is not available for analysis.")
+def _load_document_text_from_index(db: Session, document: DocumentRecord) -> str:
+    """Rebuild document text from indexed Chroma chunks when the upload file was cleaned up."""
+    from app.services.documents_services import get_document_collection
+
+    if document.chunks_created <= 0 and document.indexing_stage != "ready":
+        raise FileNotFoundError("Document has not been indexed yet.")
+
+    chroma_collection = get_document_collection()
     try:
-        return _truncate(load_document(document.storage_path))
-    except DocumentLoadError as exc:
-        raise ValueError(str(exc)) from exc
+        matches = chroma_collection.get(
+            where={
+                "$and": [
+                    {"user_id": str(document.user_id)},
+                    {"document_id": str(document.id)},
+                ]
+            },
+            include=["documents", "metadatas"],
+        )
+    except Exception as exc:
+        raise FileNotFoundError("Document text is not available for analysis.") from exc
+
+    chunks = matches.get("documents") or []
+    metadatas = matches.get("metadatas") or []
+    if not chunks:
+        raise FileNotFoundError("Document text is not available for analysis.")
+
+    ordered: list[tuple[str, dict]] = []
+    for index, chunk in enumerate(chunks):
+        if not chunk or not str(chunk).strip():
+            continue
+        metadata = metadatas[index] if index < len(metadatas) else {}
+        ordered.append((str(chunk), metadata or {}))
+
+    ordered.sort(key=lambda item: int(item[1].get("chunk_index", 0) or 0))
+    combined = "\n\n".join(chunk for chunk, _ in ordered).strip()
+    if not combined:
+        raise FileNotFoundError("Document text is not available for analysis.")
+    return _truncate(combined)
+
+
+def _load_document_text(db: Session, document: DocumentRecord) -> str:
+    if document.storage_path and os.path.exists(document.storage_path):
+        try:
+            return _truncate(load_document(document.storage_path))
+        except DocumentLoadError as exc:
+            raise ValueError(str(exc)) from exc
+
+    return _load_document_text_from_index(db, document)
 
 
 def get_document_insight(
@@ -164,7 +205,7 @@ def generate_document_insights(
     model_name = settings.GROQ_MODEL
 
     try:
-        document_text = _load_document_text(document)
+        document_text = _load_document_text(db, document)
         prompt = _build_analysis_prompt(filename=document.filename, document_text=document_text)
         raw = invoke_generate(
             prompt,

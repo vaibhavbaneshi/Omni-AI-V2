@@ -11,6 +11,10 @@ type DocumentInsightsPanelProps = {
   generating?: boolean;
   error?: string | null;
   onGenerate: (options?: { force?: boolean }) => void;
+  embedded?: boolean;
+  documents?: DocumentRecord[];
+  activeDocumentId?: number | null;
+  onSelectDocument?: (documentId: number) => void;
 };
 
 function BulletList({ items, emptyLabel }: { items: string[]; emptyLabel: string }) {
@@ -33,6 +37,10 @@ export function DocumentInsightsPanel({
   generating = false,
   error,
   onGenerate,
+  embedded = false,
+  documents = [],
+  activeDocumentId,
+  onSelectDocument,
 }: DocumentInsightsPanelProps) {
   if (!document) return null;
 
@@ -41,7 +49,7 @@ export function DocumentInsightsPanel({
   const hasInsights = insights?.status === "ready" && payload;
 
   return (
-    <div className="mb-3 rounded-xl border border-white/5 bg-white/[0.02] p-3 sm:p-4">
+    <div className={embedded ? "space-y-3" : "mb-3 rounded-xl border border-white/5 bg-white/[0.02] p-3 sm:p-4"}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10">
@@ -78,6 +86,25 @@ export function DocumentInsightsPanel({
           )}
         </Button>
       </div>
+
+      {embedded && documents.length > 1 && onSelectDocument && (
+        <div className="flex flex-wrap gap-1.5">
+          {documents.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
+                activeDocumentId === item.id
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-white/10 text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => onSelectDocument(item.id)}
+            >
+              {item.filename}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <p className="mb-2 text-[11px] text-destructive">{error}</p>
