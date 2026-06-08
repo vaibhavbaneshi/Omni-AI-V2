@@ -54,7 +54,7 @@ export default function LandingPage() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const handleLogout = async () => {
-    await logoutSession(session?.refreshToken).catch(() => undefined);
+    await logoutSession().catch(() => undefined);
     clearSession();
     router.replace("/");
   };

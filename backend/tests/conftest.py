@@ -38,6 +38,7 @@ from app.models import document_entity  # noqa: F401
 from app.models import knowledge_graph  # noqa: F401
 from app.models import agent_trace  # noqa: F401
 from app.models import rbac  # noqa: F401
+from app.models import github_connector  # noqa: F401
 from app.models import research_report  # noqa: F401 — register research reports
 from app.models import chat_folder  # noqa: F401 — register chat folders
 from app.models.chat_session import ChatSession
@@ -118,6 +119,11 @@ def client(db_session) -> Generator[TestClient, None, None]:
                 with TestClient(app) as test_client:
                     yield test_client
                 app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def auth_headers(auth_context):
+    return auth_context["headers"]
 
 
 @pytest.fixture

@@ -71,10 +71,7 @@ export default function LoginPage() {
           />
 
           <p className="mt-6 text-center text-[12px] text-muted-foreground/60">
-            Don&apos;t have an account?{" "}
-            <Link href="/register" className="text-primary hover:underline font-medium">
-              Create one
-            </Link>
+            OmniAI uses Google or GitHub sign-in only. No password required.
           </p>
         </div>
       </motion.div>

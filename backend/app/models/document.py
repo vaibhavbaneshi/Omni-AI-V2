@@ -117,6 +117,12 @@ class DocumentRecord(Base):
         default="queued",
     )
 
+    security_status = Column(
+        String,
+        nullable=False,
+        default="approved",
+    )
+
     indexing_error = Column(
         String,
         nullable=True,

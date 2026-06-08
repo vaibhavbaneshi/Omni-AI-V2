@@ -804,7 +804,7 @@ export default function ChatPage() {
   const displayName = session?.name || "John Doe";
 
   const handleLogout = async () => {
-    await logoutSession(session?.refreshToken).catch(() => undefined);
+    await logoutSession().catch(() => undefined);
     clearSession();
     window.location.assign("/");
   };

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Sparkles } from "lucide-react";
 import { createSession } from "@/lib/auth";
+import { fetchAuthSession } from "@/lib/api";
 import { sanitizeAuthError } from "@/lib/user-facing-errors";
 
 function AuthCallbackContent() {
@@ -13,49 +14,37 @@ function AuthCallbackContent() {
 
   useEffect(() => {
     const error = searchParams.get("error");
-    const token = searchParams.get("token");
-    const refreshToken = searchParams.get("refresh_token");
-    const email = searchParams.get("email");
-    const name = searchParams.get("name");
-    const username = searchParams.get("username");
     const next = searchParams.get("next") || "/dashboard";
+    const status = searchParams.get("status");
 
     if (error) {
       const safeError = sanitizeAuthError(error);
-      const messageTimeout = window.setTimeout(() => {
-        setMessage(safeError);
-      }, 0);
+      setMessage(safeError);
       const timeout = window.setTimeout(() => {
         router.replace(`/login?error=${encodeURIComponent(safeError)}`);
       }, 2500);
-      return () => {
-        window.clearTimeout(messageTimeout);
-        window.clearTimeout(timeout);
-      };
+      return () => window.clearTimeout(timeout);
     }
 
-    if (!token || !email) {
-      const messageTimeout = window.setTimeout(() => {
-        setMessage("Invalid authentication response.");
-      }, 0);
-      const timeout = window.setTimeout(() => {
-        router.replace("/login");
-      }, 2500);
-      return () => {
-        window.clearTimeout(messageTimeout);
-        window.clearTimeout(timeout);
-      };
+    if (status === "ok" || searchParams.get("token")) {
+      fetchAuthSession()
+        .then((profile) => {
+          createSession({
+            email: profile.email,
+            name: profile.name || profile.username,
+            username: profile.username,
+          });
+          router.replace(next.startsWith("/") ? next : "/dashboard");
+        })
+        .catch(() => {
+          setMessage("Unable to establish session.");
+          router.replace("/login");
+        });
+      return;
     }
 
-    createSession({
-      email,
-      name: name || email.split("@")[0],
-      username: username || email,
-      token,
-      refreshToken,
-    });
-
-    router.replace(next.startsWith("/") ? next : "/dashboard");
+    setMessage("Invalid authentication response.");
+    router.replace("/login");
   }, [router, searchParams]);
 
   return (

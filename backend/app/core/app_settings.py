@@ -143,6 +143,10 @@ class AppSettings(BaseSettings):
     ENABLE_KNOWLEDGE_GRAPH: bool = True
     ENABLE_GRAPH_RAG: bool = True
     ENABLE_RBAC: bool = False
+    CLAMAV_ENABLED: bool = False
+    CLAMAV_REQUIRED: bool = False
+    CLAMAV_SOCKET: str = "/var/run/clamav/clamd.ctl"
+    AUTH_COOKIE_ENABLED: bool = True
     NEO4J_URI: str = ""
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = ""

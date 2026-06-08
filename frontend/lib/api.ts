@@ -1,6 +1,7 @@
 import { sanitizeChatError } from "@/lib/user-facing-errors";
 import {
   AUTH_EXPIRED_MESSAGE,
+  getCsrfToken,
   getSession,
   handleAuthExpiration,
   persistSession,
@@ -35,36 +36,31 @@ export function isAuthExpiredError(error: unknown): error is AuthExpiredError {
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken() {
-  const session = getSession();
-  if (!session?.refreshToken) return null;
-
   if (!refreshPromise) {
     refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: session.refreshToken }),
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(getCsrfToken() ? { "X-CSRF-Token": getCsrfToken()! } : {}),
+      },
     })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        const body = (await response.json()) as {
-          access_token?: string;
-          refresh_token?: string;
-        };
-        if (!body.access_token || !body.refresh_token) return null;
-        persistSession({
-          ...session,
-          token: body.access_token,
-          refreshToken: body.refresh_token,
-        });
-        return body.access_token;
-      })
+      .then(async (response) => (response.ok ? "ok" : null))
       .catch(() => null)
       .finally(() => {
         refreshPromise = null;
       });
   }
-
   return refreshPromise;
+}
+
+export async function fetchAuthSession() {
+  return apiRequest<{
+    id: number;
+    username: string;
+    email: string;
+    name: string;
+  }>("/auth/session", { credentials: "include" }, null, false);
 }
 
 async function parseResponseBody(response: Response) {
@@ -90,6 +86,11 @@ export async function apiRequest<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
+  const csrf = getCsrfToken();
+  if (csrf && options.method && options.method !== "GET" && options.method !== "HEAD") {
+    headers.set("X-CSRF-Token", csrf);
+  }
+
   if (
     options.body &&
     !(options.body instanceof FormData) &&
@@ -100,6 +101,7 @@ export async function apiRequest<T>(
 
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
+    credentials: "include",
     headers,
   });
 
@@ -112,18 +114,17 @@ export async function apiRequest<T>(
       (typeof body?.message === "string" && body.message) ||
       `Request failed (${response.status} ${response.statusText})`;
     if (response.status === 401) {
-      if (retryAuth && response.status === 401 && !path.startsWith("/auth/")) {
-        const refreshedToken = await refreshAccessToken();
-        if (refreshedToken) {
-          return apiRequest<T>(path, options, refreshedToken, false);
+      if (retryAuth && !path.startsWith("/auth/")) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          return apiRequest<T>(path, options, token, false);
         }
       }
       handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
       throw new AuthExpiredError();
     }
 
-    const message = detail;
-    throw new ApiError(message, response.status, response.statusText);
+    throw new ApiError(detail, response.status, response.statusText);
   }
 
   if (body && typeof body.error === "string") {
@@ -133,19 +134,10 @@ export async function apiRequest<T>(
   return body as T;
 }
 
-export type AuthTokenResponse = {
-  access_token: string;
-  refresh_token?: string;
-  token_type: string;
-};
-
-export async function logoutSession(refreshToken?: string | null) {
+export async function logoutSession() {
   return apiRequest<{ message: string }>(
     "/auth/logout",
-    {
-      method: "POST",
-      body: JSON.stringify({ refresh_token: refreshToken || null }),
-    },
+    { method: "POST", body: JSON.stringify({}) },
     null,
     false
   );
@@ -416,7 +408,7 @@ export type ResearchReportRecord = {
   status: string;
   model?: string | null;
   error_message?: string | null;
-  report?: {
+    report?: {
     title?: string;
     executive_summary?: string;
     key_findings?: string[];
@@ -425,6 +417,7 @@ export type ResearchReportRecord = {
     open_questions?: string[];
     methodology?: string;
     iterations?: number;
+    verification?: Record<string, unknown>;
   } | null;
   traces?: Array<Record<string, unknown>>;
   created_at?: string | null;
@@ -896,9 +889,12 @@ export async function streamChat({
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
+  const csrf = getCsrfToken();
+  if (csrf) headers.set("X-CSRF-Token", csrf);
 
   const response = await fetch(`${API_BASE}/chat-stream`, {
     method: "POST",
+    credentials: "include",
     headers,
     signal,
     body: JSON.stringify({
@@ -1368,3 +1364,92 @@ export async function deleteWorkspaceAccount(confirmation: string, token?: strin
 }
 
 export { API_BASE };
+
+// --- Phase L admin & research APIs ---
+
+export async function getAuditOverview(days = 30, token?: string | null) {
+  return apiRequest<Record<string, unknown>>(`/audit/overview?days=${days}`, {}, token);
+}
+
+export async function getAuditEvents(params?: {
+  days?: number;
+  action_prefix?: string;
+  limit?: number;
+  offset?: number;
+}, token?: string | null) {
+  const search = new URLSearchParams();
+  if (params?.days) search.set("days", String(params.days));
+  if (params?.action_prefix) search.set("action_prefix", params.action_prefix);
+  if (params?.limit) search.set("limit", String(params.limit));
+  if (params?.offset) search.set("offset", String(params.offset));
+  return apiRequest<{ total: number; events: Array<Record<string, unknown>> }>(
+    `/audit/events?${search.toString()}`,
+    {},
+    token
+  );
+}
+
+export async function getAuditUsers(limit = 100, offset = 0, token?: string | null) {
+  return apiRequest<{ total: number; users: Array<{ id: number; email: string; username: string; role: string }> }>(
+    `/audit/users?limit=${limit}&offset=${offset}`,
+    {},
+    token
+  );
+}
+
+export async function assignUserRole(userId: number, role: string, token?: string | null) {
+  return apiRequest<{ user_id: number; role: string }>(
+    `/audit/role/${userId}?role=${encodeURIComponent(role)}`,
+    { method: "PUT" },
+    token
+  );
+}
+
+export async function runResearchReport(
+  body: { query: string; session_id?: number; max_iterations?: number },
+  token?: string | null
+) {
+  return apiRequest<ResearchReportRecord>("/agents/research", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }, token);
+}
+
+export async function getGitHubConnectorStatus(token?: string | null) {
+  return apiRequest<{ connected: boolean; github_login?: string | null }>(
+    "/connectors/github/status",
+    {},
+    token
+  );
+}
+
+export async function listGitHubRepos(token?: string | null) {
+  return apiRequest<{ repositories: Array<Record<string, unknown>> }>(
+    "/connectors/github/repos",
+    {},
+    token
+  );
+}
+
+export async function syncGitHubRepo(
+  repoFullName: string,
+  token?: string | null,
+  options?: { workspaceId?: string; sessionId?: number }
+) {
+  return apiRequest<{ status: string; files_indexed?: number }>(
+    "/connectors/github/sync",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        repo_full_name: repoFullName,
+        workspace_id: options?.workspaceId ?? "default",
+        session_id: options?.sessionId,
+      }),
+    },
+    token
+  );
+}
+
+export function getGitHubConnectorAuthorizeUrl() {
+  return `${API_BASE}/connectors/github/authorize`;
+}

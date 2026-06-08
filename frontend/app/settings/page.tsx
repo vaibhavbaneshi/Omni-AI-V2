@@ -230,7 +230,6 @@ export default function SettingsPage() {
       ]);
 
       createSession({
-        token: session.token,
         email: profile.email,
         username: profile.username,
         name: `${profile.first_name} ${profile.last_name}`.trim() || profile.display_name,
@@ -254,7 +253,6 @@ export default function SettingsPage() {
       setStatusMessage("Avatar updated.");
       if (result.avatar_url) {
         createSession({
-          token: session.token,
           email,
           username: session.username,
           name: `${firstName} ${lastName}`.trim() || session.name,

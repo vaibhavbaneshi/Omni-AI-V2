@@ -20,6 +20,12 @@ from app.core.upload_storage import create_upload_directory
 from app.core.security import get_current_user
 from app.core.app_settings import get_settings
 from app.core.upload_validation import sanitize_upload_filename, validate_document_upload
+from app.services.upload_security_service import (
+    UploadSecurityError,
+    move_to_storage,
+    process_upload_security,
+    quarantine_directory,
+)
 from app.services.indexing_progress import document_status_payload, update_indexing_progress
 from app.services.ingestion_service import detect_stale_indexing, run_ingest_document_record
 from app.services.ingestion_queue import (
@@ -163,29 +169,34 @@ async def upload_document(
         user_id=current_user.id,
         session_id=session_id,
     )
+    quarantine_dir = quarantine_directory(current_user.id, session_id)
 
     safe_name = sanitize_upload_filename(file.filename)
-    file_path = os.path.join(
-        user_upload_dir,
-        safe_name
-    )
+    quarantine_path = os.path.join(quarantine_dir, safe_name)
+    file_path = os.path.join(user_upload_dir, safe_name)
 
     try:
-        with open(file_path, "wb") as f:
-            content = await file.read()
+        content = await file.read()
+        with open(quarantine_path, "wb") as f:
             f.write(content)
         logger.info(
-            "Upload stored in temporary file filename=%s size=%s path=%s user_id=%s session_id=%s",
+            "Upload quarantined filename=%s size=%s user_id=%s session_id=%s",
             safe_name,
             len(content),
-            file_path,
             current_user.id,
             session_id,
         )
-        scan_uploaded_file(file_path, filename=safe_name, user_id=current_user.id)
+        process_upload_security(
+            quarantine_path=quarantine_path,
+            filename=safe_name,
+            content_type=file.content_type,
+            user_id=current_user.id,
+        )
+        move_to_storage(quarantine_path, file_path)
     except FileScanError as exc:
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        for path in (quarantine_path, file_path):
+            if os.path.exists(path):
+                os.remove(path)
         try:
             os.rmdir(user_upload_dir)
         except OSError:
@@ -204,6 +215,16 @@ async def upload_document(
             exc_info=True,
         )
         raise HTTPException(status_code=400, detail="Uploaded file failed security scanning.") from exc
+    except UploadSecurityError as exc:
+        if os.path.exists(quarantine_path):
+            os.remove(quarantine_path)
+        audit_log(
+            db,
+            action="upload.rejected.security",
+            user_id=current_user.id,
+            detail={"filename": safe_name, "reason": str(exc), "session_id": session_id},
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         try:
             os.rmdir(user_upload_dir)
@@ -235,6 +256,7 @@ async def upload_document(
         file_size=file_size,
         chunks_created=0,
         indexing_stage="queued",
+        security_status="approved",
     )
     db.add(document)
     db.commit()

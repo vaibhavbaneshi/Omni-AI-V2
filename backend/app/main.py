@@ -40,6 +40,8 @@ from app.api.folder_routes import router as folder_router
 from app.api.search_routes import router as search_router
 from app.api.graph_routes import router as graph_router
 from app.api.audit_routes import audit_router, connector_router
+from app.api.github_connector_routes import router as github_connector_router
+from app.middleware.csrf import CSRFMiddleware
 from app.middleware.production import (
     InMemoryRateLimitMiddleware,
     RedisRateLimitMiddleware,
@@ -140,6 +142,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CSRFMiddleware)
 _rate_limit_cls = (
     RedisRateLimitMiddleware if settings.use_redis_rate_limit else InMemoryRateLimitMiddleware
 )
@@ -240,3 +243,4 @@ app.include_router(search_router)
 app.include_router(graph_router)
 app.include_router(audit_router)
 app.include_router(connector_router)
+app.include_router(github_connector_router)

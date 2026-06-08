@@ -176,7 +176,7 @@ export default function DashboardPage() {
   const initials = getInitials(session?.name);
 
   const handleLogout = async () => {
-    await logoutSession(session?.refreshToken).catch(() => undefined);
+    await logoutSession().catch(() => undefined);
     clearSession();
     router.replace("/");
   };
@@ -489,6 +489,29 @@ export default function DashboardPage() {
             <AgentTracesPanel token={session?.token} />
           </motion.div>
         </section>
+
+        <motion.section {...fadeIn} transition={{ delay: 0.35 }} className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Admin & Research</h2>
+              <p className="text-sm text-muted-foreground">Audit center, RBAC, deep research</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Link href="/admin/audit" className="rounded-lg border border-white/10 bg-card/55 p-4 hover:border-primary/30">
+              <p className="font-medium">Audit Center</p>
+              <p className="text-xs text-muted-foreground mt-1">Security events & exports</p>
+            </Link>
+            <Link href="/admin/rbac" className="rounded-lg border border-white/10 bg-card/55 p-4 hover:border-primary/30">
+              <p className="font-medium">RBAC Admin</p>
+              <p className="text-xs text-muted-foreground mt-1">Role assignment</p>
+            </Link>
+            <Link href="/research" className="rounded-lg border border-white/10 bg-card/55 p-4 hover:border-primary/30">
+              <p className="font-medium">Deep Research</p>
+              <p className="text-xs text-muted-foreground mt-1">Verified research reports</p>
+            </Link>
+          </div>
+        </motion.section>
 
         <motion.section {...fadeIn} transition={{ delay: 0.35 }} className="space-y-4">
           <div className="flex items-center justify-between">

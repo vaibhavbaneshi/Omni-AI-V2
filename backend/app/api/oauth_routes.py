@@ -3,15 +3,23 @@ from urllib.parse import urlencode
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.cookie_auth import (
+    clear_auth_cookies,
+    get_refresh_token_from_request,
+    set_auth_cookies,
+)
+from app.core.app_settings import get_settings
 from app.core.oauth_config import get_oauth_settings, oauth_providers_status
 from app.core.safe_errors import user_facing_message
 from app.db.session import get_db
+from app.models.user import User
 from app.models.user_settings import UserSessionRecord
+from app.core.security import get_current_user
 from app.services.auth_service import (
     create_access_token,
     create_refresh_token,
@@ -39,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(..., min_length=32, max_length=512)
+    refresh_token: str | None = Field(default=None, max_length=512)
 
 
 class LogoutRequest(BaseModel):
@@ -73,20 +81,29 @@ def _redirect_to_frontend_success(
     next_path: str,
 ) -> RedirectResponse:
     settings = get_oauth_settings()
-    params = urlencode(
-        {
-            "token": token,
-            "refresh_token": refresh_token,
-            "email": email,
-            "name": name,
-            "username": username,
-            "next": next_path,
-        }
-    )
-    return RedirectResponse(
+    params = urlencode({"next": next_path, "status": "ok"})
+    response = RedirectResponse(
         f"{settings['frontend_url']}/auth/callback?{params}",
         status_code=302,
     )
+    if get_settings().AUTH_COOKIE_ENABLED:
+        set_auth_cookies(response, access_token=token, refresh_token=refresh_token)
+    else:
+        legacy = urlencode(
+            {
+                "token": token,
+                "refresh_token": refresh_token,
+                "email": email,
+                "name": name,
+                "username": username,
+                "next": next_path,
+            }
+        )
+        response = RedirectResponse(
+            f"{settings['frontend_url']}/auth/callback?{legacy}",
+            status_code=302,
+        )
+    return response
 
 
 def _client_ip(request: Request) -> str | None:
@@ -129,13 +146,26 @@ def oauth_providers():
     return oauth_providers_status()
 
 
+@router.get("/session")
+def read_session(current_user: User = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "name": current_user.username,
+    }
+
+
 @router.post("/refresh")
 def refresh_session(
-    payload: RefreshRequest,
     request: Request,
+    payload: RefreshRequest | None = Body(default=None),
     db: Session = Depends(get_db),
 ):
-    token_hash = hash_refresh_token(payload.refresh_token)
+    refresh_token = payload.refresh_token if payload else get_refresh_token_from_request(request)
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh token is invalid or expired.")
+    token_hash = hash_refresh_token(refresh_token)
     record = (
         db.query(UserSessionRecord)
         .filter(
@@ -173,24 +203,30 @@ def refresh_session(
         ip_address=_client_ip(request),
         detail={"session_id": record.id},
     )
-    return {
-        "access_token": access_token,
-        "refresh_token": next_refresh_token,
-        "token_type": "bearer",
-    }
+    response = JSONResponse(
+        {
+            "access_token": access_token,
+            "refresh_token": next_refresh_token,
+            "token_type": "bearer",
+        }
+    )
+    if get_settings().AUTH_COOKIE_ENABLED:
+        set_auth_cookies(response, access_token=access_token, refresh_token=next_refresh_token)
+    return response
 
 
 @router.post("/logout")
 def logout_session(
-    payload: LogoutRequest,
     request: Request,
+    payload: LogoutRequest | None = Body(default=None),
     db: Session = Depends(get_db),
 ):
     record = None
-    if payload.refresh_token:
+    refresh_token = (payload.refresh_token if payload else None) or get_refresh_token_from_request(request)
+    if refresh_token:
         record = (
             db.query(UserSessionRecord)
-            .filter(UserSessionRecord.refresh_token_hash == hash_refresh_token(payload.refresh_token))
+            .filter(UserSessionRecord.refresh_token_hash == hash_refresh_token(refresh_token))
             .first()
         )
     if record and record.revoked_at is None:
@@ -203,7 +239,9 @@ def logout_session(
             ip_address=_client_ip(request),
             detail={"session_id": record.id},
         )
-    return {"message": "Logged out"}
+    response = JSONResponse({"message": "Logged out"})
+    clear_auth_cookies(response)
+    return response
 
 
 @router.get("/github")

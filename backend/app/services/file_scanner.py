@@ -1,14 +1,13 @@
-"""Pluggable upload scanning layer.
-
-This no-op implementation is the integration point for ClamAV or a managed
-malware scanning service. It intentionally fails closed only when a configured
-scanner reports a threat; without a scanner, validation still enforces type,
-size, and filename restrictions.
-"""
+"""Pluggable upload scanning — delegates to upload security pipeline."""
 
 from __future__ import annotations
 
 import logging
+
+from app.services.upload_security_service import (
+    UploadSecurityError,
+    process_upload_security,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +17,12 @@ class FileScanError(Exception):
 
 
 def scan_uploaded_file(file_path: str, *, filename: str, user_id: int | None = None) -> None:
-    # TODO: integrate ClamAV here, for example via clamd:
-    # result = clamd_client.instream(open(file_path, "rb"))
-    # if result indicates malware: raise FileScanError(...)
-    logger.info(
-        "Upload virus scan hook passed filename=%s path=%s user_id=%s scanner=noop",
-        filename,
-        file_path,
-        user_id,
-    )
+    try:
+        process_upload_security(
+            quarantine_path=file_path,
+            filename=filename,
+            content_type=None,
+            user_id=user_id or 0,
+        )
+    except UploadSecurityError as exc:
+        raise FileScanError(str(exc)) from exc
