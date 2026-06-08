@@ -28,7 +28,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_document_insights_id", "document_insights", ["id"])
     op.create_index("ix_document_insights_document_id", "document_insights", ["document_id"])
-    op.create_index("ix_document_insights_user_id", "document_insights", ["user_id")
+    op.create_index("ix_document_insights_user_id", "document_insights", ["user_id"])
 
 
 def downgrade() -> None:
