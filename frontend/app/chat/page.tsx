@@ -81,6 +81,12 @@ import { getPreferredModelId, setPreferredModelId } from "@/lib/model-preference
 import { sanitizeChatError, sanitizeApiError } from "@/lib/user-facing-errors";
 import { isBackendSessionId, toBackendSessionId } from "@/lib/chat-sessions";
 import {
+  clearStoredActiveChatId,
+  readStoredActiveChatId,
+  storeActiveChatId,
+  syncChatPath,
+} from "@/lib/chat-navigation";
+import {
   isSupportedUploadFilename,
   stripUploadExtension,
   SUPPORTED_UPLOADS_LABEL,
@@ -168,11 +174,6 @@ const workspaceModes = [
 ] as const;
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-
-function readUrlChatId() {
-  if (typeof window === "undefined") return null;
-  return new URLSearchParams(window.location.search).get("id");
-}
 
 function modelIconForProvider(provider: string) {
   if (provider === "deepseek") return TerminalSquare;
@@ -303,6 +304,15 @@ export default function ChatPage() {
   }, [activeChat?.id]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const legacyId = new URLSearchParams(window.location.search).get("id");
+    if (legacyId) {
+      storeActiveChatId(legacyId);
+    }
+    syncChatPath();
+  }, []);
+
+  useEffect(() => {
     if (!insightDocument) {
       setInsightDocumentId(null);
       return;
@@ -315,12 +325,9 @@ export default function ChatPage() {
   }, [insightDocument, readyDocuments]);
 
   useEffect(() => {
-    if (!activeChat) return;
-    const nextUrl = `/chat?id=${encodeURIComponent(activeChat.id)}`;
-    if (window.location.pathname + window.location.search !== nextUrl) {
-      window.history.replaceState(null, "", nextUrl);
-    }
-  }, [activeChat]);
+    storeActiveChatId(activeChat?.id ?? null);
+    syncChatPath();
+  }, [activeChat?.id]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (!shouldStickToBottomRef.current) return;
@@ -347,7 +354,8 @@ export default function ChatPage() {
   useEffect(() => {
     if (!authenticated || !session?.token) return;
 
-    const urlChatId = readUrlChatId();
+    const urlChatId = readStoredActiveChatId();
+    syncChatPath();
 
     listChatSessions(session.token)
       .then(async (records) => {
@@ -699,8 +707,8 @@ export default function ChatPage() {
           return current;
         }
         const next = remaining[0] ?? null;
-        const nextUrl = next ? `/chat?id=${encodeURIComponent(next.id)}` : "/chat";
-        window.history.replaceState(null, "", nextUrl);
+        storeActiveChatId(next?.id ?? null);
+        syncChatPath();
         return next;
       });
       return remaining;
@@ -714,7 +722,7 @@ export default function ChatPage() {
   };
 
   const handleShare = async () => {
-    const url = `${window.location.origin}/chat${activeChat ? `?id=${activeChat.id}` : ""}`;
+    const url = `${window.location.origin}/chat`;
     if (navigator.share) {
       await navigator.share({ title: activeChat?.title || "Omni AI Chat", url });
       return;

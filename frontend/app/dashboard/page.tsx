@@ -30,6 +30,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { storeActiveChatId } from "@/lib/chat-navigation";
 import {
   Area,
   AreaChart,
@@ -383,7 +384,8 @@ export default function DashboardPage() {
                   {(sessions.length ? sessions.slice(0, 6) : []).map((chat) => (
                     <Link
                       key={chat.id}
-                      href={`/chat?id=${chat.id}`}
+                      href="/chat"
+                      onClick={() => storeActiveChatId(String(chat.id))}
                       className="group grid gap-3 rounded-lg p-3 transition-all duration-200 hover:bg-white/[0.045] sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center"
                     >
                       <div className="flex size-10 items-center justify-center rounded-lg bg-white/[0.04] ring-1 ring-white/10 transition-colors group-hover:bg-primary/10 group-hover:text-primary">

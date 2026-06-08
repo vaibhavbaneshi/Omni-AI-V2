@@ -1,8 +1,11 @@
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
+from app.schemas.session_schemas import CreateSessionRequest, resolve_create_session_request
 
 from app.db.session import get_db
 
@@ -24,6 +27,7 @@ from app.core.security import get_current_user
 from app.models.user import User
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/sessions/create")
 
@@ -242,23 +246,34 @@ def refine_session_title(
 
 @router.post("/sessions")
 def create_session_with_title(
-    title: Annotated[str, Query(min_length=1, max_length=120)] = "New Chat",
-    first_message: Annotated[str | None, Query(max_length=12_000)] = None,
+    payload: CreateSessionRequest = Depends(resolve_create_session_request),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    resolved_title = title.strip() or "New Chat"
-    if first_message and first_message.strip():
-        resolved_title = generate_chat_title(first_message.strip())
+    resolved_title = payload.title.strip() or "New Chat"
+    if payload.first_message and payload.first_message.strip():
+        resolved_title = generate_chat_title(payload.first_message.strip())
 
     session = ChatSession(
         title=resolved_title,
         user_id=current_user.id,
     )
 
-    db.add(session)
-    db.commit()
-    db.refresh(session)
+    try:
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception(
+            "Failed to create chat session user_id=%s",
+            current_user.id,
+            exc_info=exc,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Chat is temporarily unavailable while the database is being updated. Please try again shortly.",
+        ) from exc
 
     return {
         "id": session.id,

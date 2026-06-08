@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.app_settings import configure_langsmith_env, get_settings
+from app.core.cors_utils import cors_headers_for_request
 from app.core.health import run_health_checks, run_startup_checks
 from app.core.logging_config import setup_logging
 from app.core.startup import log_startup_diagnostics
@@ -161,6 +162,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error. Check backend logs for details."},
+        headers=cors_headers_for_request(request),
     )
 
 

@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.app_settings import get_settings
+from app.core.cors_utils import cors_headers_for_request
 from app.core.telemetry import new_trace_id, set_trace_context
 from app.services.abuse_detection_service import record_rate_limit_event
 from app.services.rate_limit_service import (
@@ -182,14 +183,18 @@ class InMemoryRateLimitMiddleware:
                 scope_name=rule.scope,
                 limit=rule.limit,
             )
+            request = Request(scope, receive=receive)
             response = JSONResponse(
                 content={"detail": "Rate limit exceeded"},
                 status_code=429,
-                headers=rate_limit_headers(
-                    limit=rule.limit,
-                    remaining=0,
-                    reset_seconds=reset_seconds,
-                ),
+                headers={
+                    **rate_limit_headers(
+                        limit=rule.limit,
+                        remaining=0,
+                        reset_seconds=reset_seconds,
+                    ),
+                    **cors_headers_for_request(request),
+                },
             )
             await response(scope, receive, send)
             return
@@ -277,14 +282,18 @@ class RedisRateLimitMiddleware:
                 scope_name=rule.scope,
                 limit=rule.limit,
             )
+            request = Request(scope, receive=receive)
             response = JSONResponse(
                 content={"detail": "Rate limit exceeded"},
                 status_code=429,
-                headers=rate_limit_headers(
-                    limit=rule.limit,
-                    remaining=0,
-                    reset_seconds=reset_seconds,
-                ),
+                headers={
+                    **rate_limit_headers(
+                        limit=rule.limit,
+                        remaining=0,
+                        reset_seconds=reset_seconds,
+                    ),
+                    **cors_headers_for_request(request),
+                },
             )
             await response(scope, receive, send)
             return

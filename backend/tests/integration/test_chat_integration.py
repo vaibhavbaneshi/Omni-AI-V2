@@ -40,8 +40,13 @@ def test_chat_stream_returns_ndjson_tokens(
     mock_stream.return_value = iter(["Hello", " world"])
 
     response = auth_client.post(
-        f"/chat-stream?query=What+is+the+refund+policy&session_id={session.id}&mode=research",
-        headers=auth_client.auth_headers,
+        "/chat-stream",
+        headers={**auth_client.auth_headers, "Content-Type": "application/json"},
+        json={
+            "query": "What is the refund policy",
+            "session_id": session.id,
+            "mode": "research",
+        },
     )
 
     assert response.status_code == 200

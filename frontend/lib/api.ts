@@ -606,17 +606,14 @@ export async function createChatSession(
   token?: string | null,
   options?: { title?: string }
 ) {
-  const params = new URLSearchParams();
-  if (options?.title) {
-    params.set("title", options.title);
-  }
-  if (firstMessage.trim()) {
-    params.set("first_message", firstMessage.trim());
-  }
   return apiRequest<ChatSessionRecord>(
-    `/sessions?${params.toString()}`,
+    "/sessions",
     {
       method: "POST",
+      body: JSON.stringify({
+        title: options?.title || "New Chat",
+        first_message: firstMessage.trim() || null,
+      }),
     },
     token
   ).then(normalizeChatSessionRecord);
@@ -780,30 +777,25 @@ export async function streamChat({
   onEvent: (event: ChatStreamEvent) => void;
   retryAuth?: boolean;
 }) {
-  const params = new URLSearchParams({
-    query,
-    session_id: String(sessionId),
-    mode: mode || "research",
+  const headers = new Headers({
+    "Content-Type": "application/json",
   });
-
-  if (model) {
-    params.set("model", model);
-  }
-
-  if (collectionId) {
-    params.set("collection_id", String(collectionId));
-  }
-
-  const headers = new Headers();
 
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE}/chat-stream?${params.toString()}`, {
+  const response = await fetch(`${API_BASE}/chat-stream`, {
     method: "POST",
     headers,
     signal,
+    body: JSON.stringify({
+      query,
+      session_id: sessionId,
+      mode: mode || "research",
+      ...(model ? { model } : {}),
+      ...(collectionId ? { collection_id: collectionId } : {}),
+    }),
   });
 
   if (!response.ok || !response.body) {

@@ -17,6 +17,19 @@ def test_create_session(_mock_title, auth_client):
     assert "id" in payload
 
 
+@patch("app.api.session_routes.generate_chat_title", return_value="JSON Session")
+def test_create_session_json_body(_mock_title, auth_client):
+    response = auth_client.post(
+        "/sessions",
+        headers={**auth_client.auth_headers, "Content-Type": "application/json"},
+        json={"title": "New Chat", "first_message": "hello"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["title"] == "JSON Session"
+    assert "id" in payload
+
+
 def test_list_sessions(auth_client, db_session):
     ChatSessionFactory(user=auth_client.auth_user, title="Alpha")
     ChatSessionFactory(user=auth_client.auth_user, title="Beta")
