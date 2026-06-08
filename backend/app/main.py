@@ -38,6 +38,8 @@ from app.api.insights_routes import router as insights_router
 from app.api import agent_routes
 from app.api.folder_routes import router as folder_router
 from app.api.search_routes import router as search_router
+from app.api.graph_routes import router as graph_router
+from app.api.audit_routes import audit_router, connector_router
 from app.middleware.production import (
     InMemoryRateLimitMiddleware,
     RedisRateLimitMiddleware,
@@ -235,3 +237,6 @@ app.include_router(insights_router)
 app.include_router(agent_routes.router)
 app.include_router(folder_router)
 app.include_router(search_router)
+app.include_router(graph_router)
+app.include_router(audit_router)
+app.include_router(connector_router)

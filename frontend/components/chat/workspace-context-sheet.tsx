@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DocumentInsightsPanel } from "@/components/chat/document-insights-panel";
+import { KnowledgeGraphPanel } from "@/components/chat/knowledge-graph-panel";
 import { WorkspaceCollectionsPanel } from "@/components/chat/workspace-collections-panel";
 import type {
   DocumentCollection,
@@ -22,7 +23,7 @@ import type {
 } from "@/lib/api";
 import { indexingStageLabel } from "@/lib/api";
 
-export type WorkspaceContextTab = "files" | "collections" | "insights";
+export type WorkspaceContextTab = "files" | "collections" | "insights" | "graph";
 
 type WorkspaceContextSheetProps = {
   token?: string | null;
@@ -137,6 +138,9 @@ export function WorkspaceContextSheet({
                 Intelligence
                 {hasInsights && <span className="size-1.5 rounded-full bg-primary" />}
               </TabsTrigger>
+              <TabsTrigger value="graph" className="h-8 gap-1 px-0 text-[12px]">
+                Graph
+              </TabsTrigger>
             </TabsList>
           </div>
 
@@ -248,6 +252,14 @@ export function WorkspaceContextSheet({
                   </Button>
                 </div>
               )}
+            </TabsContent>
+
+            <TabsContent value="graph" className="px-4 py-4">
+              <KnowledgeGraphPanel
+                embedded
+                token={token}
+                documentId={activeDocumentId}
+              />
             </TabsContent>
           </ScrollArea>
         </Tabs>

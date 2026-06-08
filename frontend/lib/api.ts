@@ -435,6 +435,86 @@ export async function getResearchReport(reportId: number, token?: string | null)
   return apiRequest<ResearchReportRecord>(`/agents/research/${reportId}`, {}, token);
 }
 
+export type KnowledgeGraphNode = {
+  id: number;
+  name: string;
+  node_type: string;
+  document_id?: number | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type KnowledgeGraphEdge = {
+  id: number;
+  source: number;
+  target: number;
+  relation_type: string;
+  weight?: number;
+  document_id?: number | null;
+  evidence?: string | null;
+};
+
+export type KnowledgeGraphData = {
+  workspace_id?: string;
+  document_id?: number;
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+};
+
+export async function getGlobalGraph(workspaceId: string, token?: string | null, limit = 100) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, limit: String(limit) });
+  return apiRequest<KnowledgeGraphData>(`/graph/global?${params.toString()}`, {}, token);
+}
+
+export async function getDocumentGraph(documentId: number, token?: string | null) {
+  return apiRequest<KnowledgeGraphData>(`/graph/document/${documentId}`, {}, token);
+}
+
+export async function searchKnowledgeGraph(
+  query: string,
+  token?: string | null,
+  workspaceId = "default"
+) {
+  const params = new URLSearchParams({ q: query, workspace_id: workspaceId });
+  return apiRequest<KnowledgeGraphData>(`/graph/search?${params.toString()}`, {}, token);
+}
+
+export async function buildKnowledgeGraph(
+  token?: string | null,
+  options?: { workspaceId?: string; documentId?: number }
+) {
+  const params = new URLSearchParams({ workspace_id: options?.workspaceId ?? "default" });
+  if (options?.documentId != null) {
+    params.set("document_id", String(options.documentId));
+  }
+  return apiRequest<{ status: string; nodes_created: number; edges_created: number }>(
+    `/graph/build?${params.toString()}`,
+    { method: "POST" },
+    token
+  );
+}
+
+export type AgentTraceRecord = {
+  id: number;
+  query: string;
+  status: string;
+  session_id?: number | null;
+  planner_output?: Record<string, unknown> | null;
+  agent_steps?: Array<Record<string, unknown>>;
+  critic_output?: Record<string, unknown> | null;
+  final_response_preview?: string | null;
+  latency_ms?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export async function listAgentTraces(token?: string | null, limit = 20) {
+  return apiRequest<AgentTraceRecord[]>(`/agents/traces?limit=${limit}`, {}, token);
+}
+
+export async function getAgentTrace(traceId: number, token?: string | null) {
+  return apiRequest<AgentTraceRecord>(`/agents/traces/${traceId}`, {}, token);
+}
+
 export async function runDocumentAnalysisAgent(
   body: { session_id?: number; document_id?: number; force?: boolean },
   token?: string | null

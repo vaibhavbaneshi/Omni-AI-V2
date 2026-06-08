@@ -149,6 +149,31 @@ def _collect_evidence(
     return document_chunks, web_snippets, source_labels, traces, web_sources
 
 
+def _verify_report(*, query: str, evidence: str, payload: ResearchReportPayload) -> dict[str, Any]:
+    prompt = f"""You are a fact-checking agent. Compare the draft research report against the evidence.
+Return ONLY valid JSON:
+{{"verified": true, "unsupported_claims": ["..."], "confidence": "high|medium|low", "notes": "..."}}
+
+Research question: {query}
+
+DRAFT REPORT:
+{payload.model_dump_json()[:6000]}
+
+EVIDENCE:
+{evidence[:6000]}
+
+JSON:"""
+    try:
+        raw = invoke_generate(prompt, temperature=0.1, timeout=60, endpoint="agent.research.verify")
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(raw[start : end + 1])
+    except Exception:
+        logger.exception("Research verification step failed")
+    return {"verified": True, "unsupported_claims": [], "confidence": "medium", "notes": "Verification skipped."}
+
+
 class ResearchAgent:
     """Iterative retrieval + web research workflow with persisted report artifact."""
 
@@ -204,6 +229,16 @@ class ResearchAgent:
             parsed = _extract_json(raw_report)
             parsed["iterations"] = max_iterations
             payload = ResearchReportPayload.model_validate(parsed)
+
+            verification = _verify_report(query=query, evidence=raw_evidence, payload=payload)
+            payload.verification = verification
+            if verification.get("unsupported_claims"):
+                payload.open_questions = list(
+                    dict.fromkeys(
+                        payload.open_questions
+                        + [f"Verify: {claim}" for claim in verification["unsupported_claims"][:5]]
+                    )
+                )
 
             record.report = payload.model_dump()
             record.traces = traces

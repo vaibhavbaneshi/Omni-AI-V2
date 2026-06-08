@@ -27,3 +27,4 @@ openai==1.51.2
 langsmith==0.1.129
 pyotp==2.9.0
 sentry-sdk[fastapi]==2.19.2
+networkx==3.4.2

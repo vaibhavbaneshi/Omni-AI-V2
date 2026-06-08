@@ -51,6 +51,7 @@ import { Separator } from "@/components/ui/separator";
 import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
 import { formatCount, useAnalytics } from "@/hooks/useAnalytics";
 import { logoutSession } from "@/lib/api";
+import { AgentTracesPanel } from "@/components/dashboard/agent-traces-panel";
 import { cn } from "@/lib/utils";
 
 const quickActions = [
@@ -485,6 +486,7 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
             )}
+            <AgentTracesPanel token={session?.token} />
           </motion.div>
         </section>
 

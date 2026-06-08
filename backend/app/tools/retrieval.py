@@ -84,6 +84,21 @@ def retrieval_tool(
                 sources_data = session_details.get("sources", sources_data)
                 details["strategy"] = session_details.get("strategy", "session-documents")
 
+        from app.core.app_settings import get_settings
+
+        settings = get_settings()
+        if settings.ENABLE_KNOWLEDGE_GRAPH and settings.ENABLE_GRAPH_RAG and db is not None:
+            from app.services.knowledge_graph_service import graph_rag_context
+
+            graph_context = graph_rag_context(
+                db,
+                user_id=user_id,
+                query=details.get("retrieval_query") or query,
+                workspace_id=workspace_id,
+            )
+            if graph_context:
+                context = f"{graph_context}\n\n{context}".strip()
+
         sources = [
             Source(
                 title=source.get("title") or source.get("source") or "Document",

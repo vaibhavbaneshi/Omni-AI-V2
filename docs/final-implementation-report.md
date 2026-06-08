@@ -1,7 +1,7 @@
-# Final Implementation Report — Phases G & H
+# Final Implementation Report — Phases G through K
 
 **Date:** 2026-05-25  
-**Scope:** Production stabilization (G) + Document Intelligence 2.0 (H)  
+**Scope:** Production stabilization (G), Document Intelligence 2.0 (H), Knowledge Graph (I), Multi-Agent Platform (J), Enterprise (K)  
 **Status:** Implemented locally — deploy + migrate required
 
 ---
@@ -12,55 +12,45 @@
 
 | Item | Status | Summary |
 |------|--------|---------|
-| Session expiration UX | ✅ | `AuthExpiredError`, global toast, redirect preserved, stream/API auth errors suppressed |
+| Session expiration UX | ✅ | `AuthExpiredError`, global toast, redirect preserved |
 | Chat deletion persistence | ✅ | Deleted session IDs tracked; stale list fetches ignored |
 | Upload reliability | ✅ | Session ref sync + `refresh(sessionId)` after upload |
-| Response quality | ✅ | `response_formatter.py`, formatted NDJSON event, streaming plain-text render |
+| Response quality | ✅ | `response_formatter.py`, formatted NDJSON event |
 
 ### Phase H — Document Intelligence 2.0
 
 | Item | Status | Summary |
 |------|--------|---------|
-| Auto executive summary | ✅ | Existing payload + auto schedule after indexing |
-| FAQ / action items / risks | ✅ | Extended prompt + payload |
-| Timeline extraction | ✅ | `document_timeline` table + API field |
-| Entity extraction | ✅ | `document_entities` table + API field |
-| Insight persistence | ✅ | Normalized rows + JSON payload |
+| Timeline + entities | ✅ | `document_timeline`, `document_entities` tables + UI |
 | Auto-generate after index | ✅ | `ENABLE_DOCUMENT_INTELLIGENCE=true` default |
-| Frontend views | ✅ | Timeline + Key Entities in insights panel |
 
----
+### Phase I — Knowledge Graph
 
-## Changed Files
+| Item | Status | Summary |
+|------|--------|---------|
+| Graph tables | ✅ | `graph_nodes`, `graph_edges` (migration `20260606_0014`) |
+| Graph builder | ✅ | `knowledge_graph_service.py` from document entities |
+| GraphRAG | ✅ | Injected into retrieval tool when `ENABLE_GRAPH_RAG=true` |
+| Graph API | ✅ | `/graph/build`, `/graph/search`, `/graph/document/{id}`, `/graph/global` |
+| Graph UI | ✅ | Workspace sheet **Graph** tab |
 
-### Backend
-- `app/services/response_formatter.py` *(new)*
-- `app/api/chat_routes.py`
-- `app/services/document_intelligence_service.py`
-- `app/api/insights_routes.py`
-- `app/schemas/document_insight_schemas.py`
-- `app/models/document_timeline.py` *(new)*
-- `app/models/document_entity.py` *(new)*
-- `app/core/app_settings.py`
-- `alembic/versions/20260606_0013_document_intelligence_v2.py` *(new)*
-- `tests/test_response_formatter.py` *(new)*
-- `tests/test_document_intelligence_v2.py` *(new)*
-- `tests/conftest.py`
+### Phase J — Multi-Agent Platform
 
-### Frontend
-- `components/auth/auth-expired-toast.tsx` *(new)*
-- `app/layout.tsx`
-- `lib/api.ts`
-- `lib/auth.ts` (unchanged logic; toast consumes existing keys)
-- `hooks/useChatStream.ts`
-- `hooks/useDocuments.ts`
-- `app/chat/page.tsx`
-- `components/chat/markdown-message.tsx`
-- `components/chat/document-insights-panel.tsx`
+| Item | Status | Summary |
+|------|--------|---------|
+| Orchestrator | ✅ | `multi_agent_platform.py` — planner → specialists → critic → summary |
+| Trace persistence | ✅ | `agent_traces` table + `/agents/traces` API |
+| Chat integration | ✅ | `multi-agent` mode in `tool_agent.py` |
+| Dashboard | ✅ | Agent traces panel on `/dashboard` |
 
-### Documentation
-- `docs/current-state-audit.md` *(new)*
-- `docs/final-implementation-report.md` *(this file)*
+### Phase K — Enterprise
+
+| Item | Status | Summary |
+|------|--------|---------|
+| Deep research verification | ✅ | Critic step in `research_agent.py` |
+| RBAC | ✅ | `user_roles` table + `core/rbac.py` middleware |
+| Audit center | ✅ | `/audit/overview`, role assignment API |
+| Connectors | ✅ | GitHub/Notion/Confluence/Slack stubs at `/connectors` |
 
 ---
 
@@ -68,59 +58,42 @@
 
 | Revision | Description |
 |----------|-------------|
-| `20260606_0013` | Adds `document_timeline`, `document_entities` |
-
-Run before deploy:
+| `20260606_0013` | Document timeline + entities |
+| `20260606_0014` | Knowledge graph, agent traces, RBAC |
 
 ```bash
 cd backend && alembic upgrade head
 ```
 
-Verify: `GET /health/migrations` → head `20260606_0013`
+Verify: `GET /health/migrations` → head `20260606_0014`
 
 ---
 
-## Test Results
+## New Environment Variables
 
-```
-tests/test_response_formatter.py ........ 4 passed
-tests/test_document_intelligence_v2.py .. 1 passed
-tests/test_document_intelligence.py ..... 3 passed
-tests/test_chat_schemas.py .............. 4 passed
-```
-
-Frontend: `pnpm exec tsc --noEmit` — pass
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ENABLE_KNOWLEDGE_GRAPH` | `true` | Build/search graph from document entities |
+| `ENABLE_GRAPH_RAG` | `true` | Inject graph context into retrieval |
+| `ENABLE_MULTI_AGENT` | `true` | Multi-agent platform in chat |
+| `ENABLE_RBAC` | `false` | DB role checks (falls back to admin email allowlist) |
+| `NEO4J_URI` | empty | Optional Neo4j sync |
 
 ---
 
-## Remaining Gaps (Phases I–K)
+## Remaining Gaps
 
-| Phase | Status |
-|-------|--------|
-| I — Knowledge Graph | Not started |
-| J — Multi-Agent Platform | Not started |
-| K — Deep Research + Enterprise | Not started |
-
-Also remaining from cross-cutting roadmap:
 - Redis retrieval/embedding cache
-- 90%+ backend coverage
+- 90%+ backend coverage gate
 - Malware scanner integration
-- RBAC / audit center UI
-- Full `docs/` architecture refresh
+- Full connector OAuth/webhook implementations
+- LangGraph migration (current orchestrator is custom Python)
 
 ---
 
-## Future Recommendations
+## Deploy Checklist
 
-1. **Deploy G+H** — migrate DB, redeploy backend + frontend
-2. **Phase I** — `knowledge_graph_service.py` with NetworkX fallback + optional Neo4j
-3. **Phase J** — LangGraph orchestration + agent trace dashboard
-4. **Phase K** — RBAC schema, connector abstraction, deep research report UI
-5. Fix CI Sentry tests + raise coverage gate compliance
-
----
-
-## Environment Notes
-
-- `ENABLE_DOCUMENT_INTELLIGENCE` now defaults to **`true`**
-- Set `ENABLE_DOCUMENT_INTELLIGENCE=false` in production if you want manual-only insights
+1. `alembic upgrade head` → `20260606_0014`
+2. `pip install -r requirements.txt` (adds `networkx`)
+3. Redeploy backend + frontend
+4. Optional: set `NEO4J_URI` for external graph sync

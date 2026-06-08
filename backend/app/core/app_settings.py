@@ -138,7 +138,14 @@ class AppSettings(BaseSettings):
 
     ENABLE_DEEP_RESEARCH: bool = False
     ENABLE_AGENT_WORKFLOWS: bool = True
+    ENABLE_MULTI_AGENT: bool = True
     ENABLE_DOCUMENT_INTELLIGENCE: bool = True
+    ENABLE_KNOWLEDGE_GRAPH: bool = True
+    ENABLE_GRAPH_RAG: bool = True
+    ENABLE_RBAC: bool = False
+    NEO4J_URI: str = ""
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = ""
     # Phase B — rewrite follow-up queries before retrieval.
     ENABLE_QUERY_REWRITING: bool = True
     HYBRID_SEMANTIC_WEIGHT: float = 0.65

@@ -243,6 +243,22 @@ def generate_document_insights(
             model_name=model_name,
             payload=payload,
         )
+        if settings.ENABLE_KNOWLEDGE_GRAPH:
+            from app.services.knowledge_graph_service import build_workspace_graph
+
+            try:
+                build_workspace_graph(
+                    db,
+                    user_id=user_id,
+                    workspace_id=document.workspace_id or "default",
+                    document_id=document_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Knowledge graph build failed document_id=%s user_id=%s",
+                    document_id,
+                    user_id,
+                )
         db.commit()
         db.refresh(record)
         logger.info(

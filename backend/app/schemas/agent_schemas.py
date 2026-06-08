@@ -16,6 +16,7 @@ class ResearchReportPayload(BaseModel):
     open_questions: list[str] = Field(default_factory=list)
     methodology: str = ""
     iterations: int = 0
+    verification: dict[str, Any] | None = None
 
 
 class ResearchRunRequest(BaseModel):
@@ -58,3 +59,35 @@ class DocumentAnalysisResponse(BaseModel):
     message: str
     documents: list[DocumentAnalysisArtifact] = Field(default_factory=list)
     context_preview: str = ""
+
+
+class MultiAgentRunRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=12_000)
+    session_id: int | None = None
+    workspace_id: str = "default"
+    collection_id: int | None = None
+    mode: str = "research"
+
+
+class MultiAgentRunResponse(BaseModel):
+    trace_id: int
+    status: str
+    context_preview: str
+    agent_steps: list[dict[str, Any]] = Field(default_factory=list)
+    planner: dict[str, Any] | None = None
+    critic: dict[str, Any] | None = None
+    latency_ms: int | None = None
+
+
+class AgentTraceResponse(BaseModel):
+    id: int
+    query: str
+    status: str
+    session_id: int | None = None
+    planner_output: dict[str, Any] | None = None
+    agent_steps: list[dict[str, Any]] = Field(default_factory=list)
+    critic_output: dict[str, Any] | None = None
+    final_response_preview: str | None = None
+    latency_ms: int | None = None
+    created_at: str | None = None
+    updated_at: str | None = None

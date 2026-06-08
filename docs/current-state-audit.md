@@ -178,8 +178,8 @@ Controls in place: JWT, CORS validation, upload validation, audit logs, Markdown
 |-------|--------|-------|
 | G | ✅ Complete (2026-05-25) | Session toast, delete race, upload fix, response formatter |
 | H | ✅ Complete (2026-05-25) | Timeline/entity tables, auto insights, UI |
-| I | Planned | After G+H deploy |
-| J | Planned | After G+H commit |
-| K | Planned | After G+H commit |
+| I | ✅ Complete (2026-05-25) | Graph service, GraphRAG, `/graph/*`, workspace Graph tab |
+| J | ✅ Complete (2026-05-25) | Multi-agent platform, traces API, dashboard panel |
+| K | ✅ Complete (2026-05-25) | RBAC, audit/connectors API, deep research verification |
 
 *Update this table as phases complete.*

@@ -6,6 +6,7 @@ from app.agent.document_analysis_agent import (
 )
 from app.agent.orchestrator import AgentOrchestrator
 from app.agent.research_agent import run_research_agent
+from app.agent.multi_agent_platform import run_multi_agent_platform
 from app.core.app_settings import get_settings
 from app.services.attachment_service import (
     NO_DOCUMENT_MESSAGE,
@@ -91,6 +92,34 @@ def tool_calling_agent(
         mode in {"deep-research", "analyst"}
         or "deep research" in query.lower()
     )
+    multi_agent_requested = (
+        settings.ENABLE_MULTI_AGENT
+        and (
+            mode == "multi-agent"
+            or "multi-agent" in query.lower()
+            or "multi agent" in query.lower()
+        )
+    )
+    if multi_agent_requested and not document_query:
+        try:
+            return _merge_agent_fields(
+                run_multi_agent_platform(
+                    db,
+                    query=query,
+                    user_id=user_id,
+                    session_id=session_id,
+                    workspace_id=workspace_id,
+                    collection_id=collection_id,
+                    mode=mode,
+                    history=history,
+                )
+            )
+        except Exception as exc:
+            return _refusal_result(
+                strategy="multi-agent-platform",
+                message=f"Multi-agent platform failed: {exc}",
+            )
+
     if settings.ENABLE_DEEP_RESEARCH and deep_research_requested and not document_query:
         try:
             return _merge_agent_fields(
