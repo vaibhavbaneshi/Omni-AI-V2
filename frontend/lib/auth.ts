@@ -92,6 +92,9 @@ export function consumeAuthExpiredMessage() {
 export function handleAuthExpiration(status?: number, message = AUTH_EXPIRED_MESSAGE) {
   if (typeof window === "undefined" || status !== 401) return false;
   const pathname = window.location.pathname;
+  if (pathname.startsWith("/auth/callback") || pathname.startsWith("/rate-limited")) {
+    return false;
+  }
   clearAuthState();
   window.sessionStorage.setItem(AUTH_EXPIRED_KEY, message);
   if (pathname === "/login") {

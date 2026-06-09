@@ -132,6 +132,10 @@ export function sanitizeApiError(
     return "You do not have permission to access this resource.";
   }
 
+  if (options?.status === 429) {
+    return "Too many requests. Please wait a moment and try again.";
+  }
+
   if (!raw?.trim()) {
     return fallback;
   }
@@ -142,4 +146,16 @@ export function sanitizeApiError(
   }
 
   return message;
+}
+
+export function sanitizeRateLimitError(options?: { retryAfter?: number }): string {
+  const seconds = options?.retryAfter;
+  if (seconds && seconds > 0) {
+    if (seconds >= 60) {
+      const minutes = Math.ceil(seconds / 60);
+      return `Too many requests. Please wait about ${minutes} minute${minutes === 1 ? "" : "s"} and try again.`;
+    }
+    return `Too many requests. Please wait ${seconds} second${seconds === 1 ? "" : "s"} and try again.`;
+  }
+  return "Too many requests. Please wait a moment and try again.";
 }

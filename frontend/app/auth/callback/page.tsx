@@ -16,6 +16,8 @@ function AuthCallbackContent() {
     const error = searchParams.get("error");
     const next = searchParams.get("next") || "/dashboard";
     const status = searchParams.get("status");
+    const legacyToken = searchParams.get("token");
+    const legacyEmail = searchParams.get("email");
 
     if (error) {
       const safeError = sanitizeAuthError(error);
@@ -26,7 +28,17 @@ function AuthCallbackContent() {
       return () => window.clearTimeout(timeout);
     }
 
-    if (status === "ok" || searchParams.get("token")) {
+    if (legacyToken && legacyEmail) {
+      createSession({
+        email: legacyEmail,
+        name: searchParams.get("name") || legacyEmail.split("@")[0] || "User",
+        username: searchParams.get("username") || legacyEmail,
+      });
+      router.replace(next.startsWith("/") ? next : "/dashboard");
+      return;
+    }
+
+    if (status === "ok" || legacyToken) {
       fetchAuthSession()
         .then((profile) => {
           createSession({
@@ -37,8 +49,9 @@ function AuthCallbackContent() {
           router.replace(next.startsWith("/") ? next : "/dashboard");
         })
         .catch(() => {
-          setMessage("Unable to establish session.");
-          router.replace("/login");
+          const signInError = "Sign-in could not be completed. Please try again.";
+          setMessage(signInError);
+          router.replace(`/login?error=${encodeURIComponent(signInError)}`);
         });
       return;
     }

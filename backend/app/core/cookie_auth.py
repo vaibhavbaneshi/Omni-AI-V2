@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import Request, Response
 
@@ -15,12 +16,28 @@ CSRF_COOKIE = "omniai_csrf"
 CSRF_HEADER = "X-CSRF-Token"
 
 
+def _is_cross_origin_auth() -> bool:
+    """True when the SPA and API are on different origins (e.g. Vercel + Railway)."""
+    settings = get_settings()
+    try:
+        frontend = urlparse(settings.FRONTEND_URL.strip().rstrip("/"))
+        api = urlparse(settings.API_PUBLIC_URL.strip().rstrip("/"))
+        return (frontend.scheme, frontend.netloc) != (api.scheme, api.netloc)
+    except Exception:
+        return settings.ENVIRONMENT in {"production", "staging"}
+
+
 def _cookie_secure() -> bool:
-    return get_settings().ENVIRONMENT == "production"
+    settings = get_settings()
+    if settings.ENVIRONMENT in {"production", "staging"}:
+        return True
+    return settings.API_PUBLIC_URL.strip().lower().startswith("https://")
 
 
 def _cookie_samesite() -> str:
-    return "none" if _cookie_secure() else "lax"
+    if _cookie_secure() or _is_cross_origin_auth():
+        return "none"
+    return "lax"
 
 
 def generate_csrf_token() -> str:

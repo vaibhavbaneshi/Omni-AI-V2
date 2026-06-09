@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
 from starlette.requests import Request
+
+from app.core.app_settings import get_settings
 
 
 EXEMPT_PATHS = {
@@ -18,6 +21,12 @@ EXEMPT_PATHS = {
     "/openapi.json",
 }
 
+# OAuth redirects must not return raw JSON to the browser during sign-in.
+OAUTH_FLOW_PREFIXES = (
+    "/auth/github",
+    "/auth/google",
+)
+
 
 @dataclass(frozen=True)
 class RateLimitRule:
@@ -26,13 +35,32 @@ class RateLimitRule:
     scope: str
 
 
+def is_rate_limit_exempt_path(path: str) -> bool:
+    if path in EXEMPT_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in OAUTH_FLOW_PREFIXES)
+
+
+def is_browser_navigation(request: Request) -> bool:
+    if request.headers.get("sec-fetch-mode") == "navigate":
+        return True
+    accept = request.headers.get("accept", "")
+    return "text/html" in accept.lower()
+
+
+def browser_rate_limit_redirect_url(*, retry_after: int, scope: str) -> str:
+    frontend = get_settings().FRONTEND_URL.strip().rstrip("/")
+    params = urlencode({"retry_after": str(max(1, retry_after)), "scope": scope})
+    return f"{frontend}/rate-limited?{params}"
+
+
 def rule_for_path(path: str, *, default_limit: int = 120) -> RateLimitRule:
     if path.startswith("/upload"):
         return RateLimitRule(limit=10, window_seconds=3600, scope="uploads")
     if path.startswith("/chat"):
         return RateLimitRule(limit=30, window_seconds=60, scope="chat")
     if path.startswith("/auth/"):
-        return RateLimitRule(limit=10, window_seconds=60, scope="auth")
+        return RateLimitRule(limit=30, window_seconds=60, scope="auth")
     return RateLimitRule(limit=max(min(default_limit, 1000), 1), window_seconds=60, scope="api")
 
 

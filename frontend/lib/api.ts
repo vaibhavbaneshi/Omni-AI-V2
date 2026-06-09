@@ -1,4 +1,4 @@
-import { sanitizeChatError } from "@/lib/user-facing-errors";
+import { sanitizeChatError, sanitizeRateLimitError } from "@/lib/user-facing-errors";
 import {
   AUTH_EXPIRED_MESSAGE,
   getCsrfToken,
@@ -29,8 +29,35 @@ export class AuthExpiredError extends ApiError {
   }
 }
 
+export class RateLimitError extends ApiError {
+  retryAfter: number;
+
+  constructor(message: string, retryAfter: number) {
+    super(message, 429);
+    this.name = "RateLimitError";
+    this.retryAfter = retryAfter;
+  }
+}
+
 export function isAuthExpiredError(error: unknown): error is AuthExpiredError {
   return error instanceof AuthExpiredError;
+}
+
+export function isRateLimitError(error: unknown): error is RateLimitError {
+  return error instanceof RateLimitError;
+}
+
+function shouldTriggerAuthExpiration(path: string): boolean {
+  if (path.startsWith("/auth/session") || path.startsWith("/auth/refresh") || path.startsWith("/auth/logout")) {
+    return false;
+  }
+  if (typeof window !== "undefined") {
+    const pathname = window.location.pathname;
+    if (pathname.startsWith("/auth/callback") || pathname.startsWith("/login") || pathname.startsWith("/register")) {
+      return false;
+    }
+  }
+  return true;
 }
 
 let refreshPromise: Promise<string | null> | null = null;
@@ -55,12 +82,27 @@ async function refreshAccessToken() {
 }
 
 export async function fetchAuthSession() {
-  return apiRequest<{
-    id: number;
-    username: string;
-    email: string;
-    name: string;
-  }>("/auth/session", { credentials: "include" }, null, false);
+  try {
+    return await apiRequest<{
+      id: number;
+      username: string;
+      email: string;
+      name: string;
+    }>("/auth/session", { credentials: "include" }, null, false);
+  } catch (error) {
+    if (error instanceof AuthExpiredError) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        return apiRequest<{
+          id: number;
+          username: string;
+          email: string;
+          name: string;
+        }>("/auth/session", { credentials: "include" }, null, false);
+      }
+    }
+    throw error;
+  }
 }
 
 async function parseResponseBody(response: Response) {
@@ -120,8 +162,19 @@ export async function apiRequest<T>(
           return apiRequest<T>(path, options, token, false);
         }
       }
-      handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
-      throw new AuthExpiredError();
+      if (shouldTriggerAuthExpiration(path)) {
+        handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
+      }
+      throw new AuthExpiredError(
+        path.startsWith("/auth/session")
+          ? "Unable to establish session. Please try signing in again."
+          : AUTH_EXPIRED_MESSAGE
+      );
+    }
+
+    if (response.status === 429) {
+      const retryAfter = Number.parseInt(response.headers.get("Retry-After") || "60", 10);
+      throw new RateLimitError(sanitizeRateLimitError(), Number.isFinite(retryAfter) ? retryAfter : 60);
     }
 
     throw new ApiError(detail, response.status, response.statusText);

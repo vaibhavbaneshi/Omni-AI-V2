@@ -13,7 +13,7 @@ from collections import defaultdict, deque
 from typing import Callable
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.app_settings import get_settings
@@ -21,9 +21,11 @@ from app.core.cors_utils import cors_headers_for_request
 from app.core.telemetry import new_trace_id, set_trace_context
 from app.services.abuse_detection_service import record_rate_limit_event
 from app.services.rate_limit_service import (
-    EXEMPT_PATHS,
     bucket_key,
+    browser_rate_limit_redirect_url,
     client_ip_from_scope,
+    is_browser_navigation,
+    is_rate_limit_exempt_path,
     rate_limit_headers,
     reset_seconds_for_window,
     rule_for_path,
@@ -141,6 +143,38 @@ def _encode_rate_limit_headers(headers: dict[str, str]) -> list[tuple[bytes, byt
     return [(key.lower().encode("latin-1"), value.encode("latin-1")) for key, value in headers.items()]
 
 
+def _rate_limit_response(
+    *,
+    request: Request,
+    path: str,
+    rule,
+    reset_seconds: int,
+) -> Response:
+    headers = {
+        **rate_limit_headers(
+            limit=rule.limit,
+            remaining=0,
+            reset_seconds=reset_seconds,
+        ),
+        **cors_headers_for_request(request),
+    }
+    if path.startswith("/auth/") and is_browser_navigation(request):
+        redirect_url = browser_rate_limit_redirect_url(
+            retry_after=reset_seconds,
+            scope=rule.scope,
+        )
+        return RedirectResponse(
+            redirect_url,
+            status_code=302,
+            headers=headers,
+        )
+    return JSONResponse(
+        content={"detail": "Rate limit exceeded"},
+        status_code=429,
+        headers=headers,
+    )
+
+
 class InMemoryRateLimitMiddleware:
     """Simple per-IP sliding window limiter for single-process development."""
 
@@ -155,7 +189,7 @@ class InMemoryRateLimitMiddleware:
             return
 
         path = scope.get("path", "")
-        if path in EXEMPT_PATHS:
+        if is_rate_limit_exempt_path(path):
             await self.app(scope, receive, send)
             return
 
@@ -184,17 +218,11 @@ class InMemoryRateLimitMiddleware:
                 limit=rule.limit,
             )
             request = Request(scope, receive=receive)
-            response = JSONResponse(
-                content={"detail": "Rate limit exceeded"},
-                status_code=429,
-                headers={
-                    **rate_limit_headers(
-                        limit=rule.limit,
-                        remaining=0,
-                        reset_seconds=reset_seconds,
-                    ),
-                    **cors_headers_for_request(request),
-                },
+            response = _rate_limit_response(
+                request=request,
+                path=path,
+                rule=rule,
+                reset_seconds=reset_seconds,
             )
             await response(scope, receive, send)
             return
@@ -260,7 +288,7 @@ class RedisRateLimitMiddleware:
             return
 
         path = scope.get("path", "")
-        if path in EXEMPT_PATHS:
+        if is_rate_limit_exempt_path(path):
             await self.app(scope, receive, send)
             return
 
@@ -283,17 +311,11 @@ class RedisRateLimitMiddleware:
                 limit=rule.limit,
             )
             request = Request(scope, receive=receive)
-            response = JSONResponse(
-                content={"detail": "Rate limit exceeded"},
-                status_code=429,
-                headers={
-                    **rate_limit_headers(
-                        limit=rule.limit,
-                        remaining=0,
-                        reset_seconds=reset_seconds,
-                    ),
-                    **cors_headers_for_request(request),
-                },
+            response = _rate_limit_response(
+                request=request,
+                path=path,
+                rule=rule,
+                reset_seconds=reset_seconds,
             )
             await response(scope, receive, send)
             return
