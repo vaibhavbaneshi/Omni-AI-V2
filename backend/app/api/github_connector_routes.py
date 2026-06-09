@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -18,9 +18,10 @@ from app.models.user import User
 from app.services.github_connector_service import (
     build_connector_authorize_url,
     connect_github_account_from_token,
+    disconnect_github,
     get_connection,
     list_repositories,
-    run_github_sync_job,
+    sync_repository,
 )
 from app.services.oauth_service import decode_oauth_state, exchange_github_code
 
@@ -44,6 +45,15 @@ def github_status(
         "github_login": connection.github_login if connection else None,
         "signed_in_with_github": current_user.oauth_provider == "github",
     }
+
+
+@router.delete("/disconnect")
+def github_disconnect(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    disconnected = disconnect_github(db, user_id=current_user.id)
+    return {"disconnected": disconnected}
 
 
 @router.get("/authorize-url")
@@ -129,7 +139,6 @@ def github_repos(
 @router.post("/sync")
 def github_sync(
     body: GitHubSyncRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -155,27 +164,12 @@ def github_sync(
             "files_indexed": sync.files_indexed,
         }
 
-    if sync is None:
-        sync = GitHubRepositorySync(
-            user_id=current_user.id,
-            connection_id=connection.id,
+    try:
+        return sync_repository(
+            db,
+            user=current_user,
             repo_full_name=body.repo_full_name,
-            default_branch="main",
             workspace_id=body.workspace_id,
         )
-        db.add(sync)
-    sync.sync_status = "running"
-    sync.sync_metadata = None
-    db.commit()
-
-    background_tasks.add_task(
-        run_github_sync_job,
-        user_id=current_user.id,
-        repo_full_name=body.repo_full_name,
-        workspace_id=body.workspace_id,
-    )
-    return {
-        "status": "running",
-        "message": "Sync started. Files will appear in the GitHub collection shortly.",
-        "files_indexed": sync.files_indexed,
-    }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

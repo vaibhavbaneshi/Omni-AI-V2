@@ -201,6 +201,19 @@ def handle_connector_callback(
     return connect_github_account_from_token(db, user=user, access_token=access_token)
 
 
+def disconnect_github(db: Session, *, user_id: int) -> bool:
+    """Remove stored GitHub OAuth token for this user."""
+    connection = get_connection(db, user_id=user_id)
+    if connection is None:
+        return False
+    db.query(GitHubRepositorySync).filter(GitHubRepositorySync.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.delete(connection)
+    db.commit()
+    return True
+
+
 def list_repositories(db: Session, *, user_id: int) -> list[dict[str, Any]]:
     connection = get_connection(db, user_id=user_id)
     if not connection:
@@ -409,6 +422,16 @@ def _index_repo_from_tarball(
     session_id: int | None,
 ) -> dict[str, int]:
     archive_bytes = _download_repo_tarball(connection.access_token, repo_full_name, branch)
+    if len(archive_bytes) < 64:
+        raise ValueError(
+            f"GitHub returned an empty archive for {repo_full_name}. "
+            "Reconnect GitHub and ensure the repo scope is granted."
+        )
+    logger.info(
+        "GitHub tarball downloaded for %s (%s bytes)",
+        repo_full_name,
+        len(archive_bytes),
+    )
     stats = {
         "files_indexed": 0,
         "skipped_files": 0,
@@ -416,12 +439,21 @@ def _index_repo_from_tarball(
         "skipped_extension": 0,
         "skipped_too_large": 0,
         "candidates_seen": 0,
+        "tarball_members": 0,
         "truncated": 0,
     }
 
     with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as archive:
-        root_prefix = _tarball_root_prefix(archive.getmembers())
-        for member in archive.getmembers():
+        members = archive.getmembers()
+        stats["tarball_members"] = len(members)
+        root_prefix = _tarball_root_prefix(members)
+        logger.info(
+            "GitHub tarball for %s: %d members, root_prefix=%r",
+            repo_full_name,
+            len(members),
+            root_prefix,
+        )
+        for member in members:
             if not member.isfile():
                 continue
             relative_path = _tarball_relative_path(member.name, root_prefix)
@@ -569,9 +601,10 @@ def _index_github_file(
     if settings.INGEST_IN_BACKGROUND and ingest_queue_enabled():
         dispatch_document_ingestion(db, document.id)
     else:
-        from app.services.ingestion_service import run_ingest_document_record
-
-        run_ingest_document_record(db, document.id)
+        logger.warning(
+            "Ingest queue unavailable; GitHub document %s saved as queued without worker dispatch",
+            document.id,
+        )
 
 
 def _should_skip_repo_path(path: str) -> bool:

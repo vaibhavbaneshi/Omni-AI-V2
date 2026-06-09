@@ -1516,7 +1516,12 @@ export async function syncGitHubRepo(
     status: string;
     message?: string;
     files_indexed?: number;
+    candidates_seen?: number;
+    skipped_extension?: number;
+    skipped_ignored_path?: number;
+    tarball_members?: number;
     skipped_files?: number;
+    sync_error?: string;
   }>(
     "/connectors/github/sync",
     {
@@ -1526,6 +1531,14 @@ export async function syncGitHubRepo(
         workspace_id: options?.workspaceId ?? "default",
       }),
     },
+    token
+  );
+}
+
+export async function disconnectGitHub(token?: string | null) {
+  return apiRequest<{ disconnected: boolean }>(
+    "/connectors/github/disconnect",
+    { method: "DELETE" },
     token
   );
 }

@@ -4,11 +4,50 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Code2, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
+  disconnectGitHub,
   getGitHubConnectorAuthorizeUrl,
   getGitHubConnectorStatus,
   listGitHubRepos,
   syncGitHubRepo,
 } from "@/lib/api";
+
+type SyncResult = Awaited<ReturnType<typeof syncGitHubRepo>>;
+
+function describeSyncResult(repoFullName: string, result: SyncResult): { kind: "success" | "error"; message: string } {
+  const count = Number(result.files_indexed ?? 0);
+  const candidates = Number(result.candidates_seen ?? 0);
+  const tarballMembers = Number(result.tarball_members ?? 0);
+  const skippedExtension = Number(result.skipped_extension ?? 0);
+
+  if (count > 0) {
+    return {
+      kind: "success",
+      message: `Synced ${count} file${count === 1 ? "" : "s"} from ${repoFullName}. Check the GitHub collection in Files.`,
+    };
+  }
+  if (candidates > 0) {
+    return {
+      kind: "error",
+      message: `Found ${candidates} source file${candidates === 1 ? "" : "s"} in ${repoFullName} but none were indexed. Reconnect GitHub with repo access, then sync again.`,
+    };
+  }
+  if (tarballMembers === 0) {
+    return {
+      kind: "error",
+      message: `GitHub returned an empty archive for ${repoFullName}. Disconnect GitHub below, reconnect, and grant repo access when prompted.`,
+    };
+  }
+  if (skippedExtension > 0) {
+    return {
+      kind: "success",
+      message: `Sync finished for ${repoFullName}, but no supported source files were found (${skippedExtension} files skipped by type). Supported: .js, .jsx, .ts, .tsx, .py, .md, etc.`,
+    };
+  }
+  return {
+    kind: "success",
+    message: `Sync finished for ${repoFullName}, but no indexable source files were found. Reconnect GitHub if this repo is private.`,
+  };
+}
 
 type GitHubConnectorPanelProps = {
   token?: string | null;
@@ -132,6 +171,20 @@ export function GitHubConnectorPanel({
     }
   };
 
+  const handleDisconnect = async () => {
+    setError(null);
+    setSuccess(null);
+    try {
+      await disconnectGitHub(token);
+      setConnected(false);
+      setGithubLogin(null);
+      setRepos([]);
+      setSuccess("GitHub disconnected. Your app login is unchanged — reconnect anytime from here.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to disconnect GitHub.");
+    }
+  };
+
   const handleSync = async (repoFullName: string) => {
     setSyncing(repoFullName);
     setError(null);
@@ -139,19 +192,19 @@ export function GitHubConnectorPanel({
     try {
       const result = await syncGitHubRepo(repoFullName, token);
       if (result.status === "running") {
-        setSuccess(result.message ?? "Sync started. This may take a minute for larger repositories.");
+        setSuccess(result.message ?? "Sync already in progress for this repository.");
         pollUntilSettled(repoFullName);
         return;
       }
-            if (result.status === "unchanged") {
+      if (result.status === "unchanged") {
         setSuccess(`Already up to date (${result.files_indexed ?? 0} indexed files).`);
       } else {
-        const count = result.files_indexed ?? 0;
-        setSuccess(
-          count > 0
-            ? `Synced ${count} file${count === 1 ? "" : "s"} from ${repoFullName}.`
-            : `Sync finished for ${repoFullName}, but no indexable source files were found. Supported: code and docs in folders like frontend/ or backend/ (.js, .jsx, .ts, .py, .md, etc.). node_modules and build folders are skipped.`
-        );
+        const feedback = describeSyncResult(repoFullName, result);
+        if (feedback.kind === "error") {
+          setError(feedback.message);
+        } else {
+          setSuccess(feedback.message);
+        }
       }
       await load();
       await onDocumentsRefresh?.();
@@ -219,7 +272,20 @@ export function GitHubConnectorPanel({
         <div className="space-y-3">
           <p className="text-[12px] text-muted-foreground">
             Connected as <span className="text-foreground font-medium">@{githubLogin}</span>
+            {" · "}
+            Stays linked to your account after logout. Use Disconnect to remove GitHub access.
           </p>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 text-[11px] text-muted-foreground hover:text-destructive"
+              onClick={() => void handleDisconnect()}
+            >
+              Disconnect GitHub
+            </Button>
+          </div>
           {repos.length === 0 && !loading && (
             <p className="text-[12px] text-muted-foreground">No repositories found.</p>
           )}

@@ -40,6 +40,7 @@ from app.services.file_scanner import FileScanError, scan_uploaded_file
 from app.services.github_connector_service import (
     _decode_content,
     build_connector_authorize_url,
+    disconnect_github,
     get_connection,
     handle_connector_callback,
     link_github_account_from_login,
@@ -400,8 +401,11 @@ def test_github_list_repositories(db_session):
     assert repos[0]["last_sync_at"] is not None
 
 
-@patch("app.services.ingestion_service.run_ingest_document_record")
-def test_github_sync_repository_indexes_files(mock_ingest, db_session):
+@patch("app.services.ingestion_queue.dispatch_document_ingestion")
+@patch("app.services.ingestion_queue.ingest_queue_enabled", return_value=True)
+@patch("app.core.app_settings.get_settings")
+def test_github_sync_repository_indexes_files(mock_get_settings, mock_queue_enabled, mock_dispatch, db_session):
+    mock_get_settings.return_value = MagicMock(INGEST_IN_BACKGROUND=True)
     user = UserFactory()
     save_connection(
         db_session,
@@ -439,7 +443,22 @@ def test_github_sync_repository_indexes_files(mock_ingest, db_session):
             )
     assert result["status"] == "complete"
     assert result["files_indexed"] == 2
-    assert mock_ingest.call_count == 2
+    assert result["candidates_seen"] == 2
+    assert mock_dispatch.call_count == 2
+
+
+def test_github_disconnect_clears_connection(db_session):
+    user = UserFactory()
+    save_connection(
+        db_session,
+        user_id=user.id,
+        github_user_id="1",
+        github_login="dev",
+        access_token="token",
+    )
+    assert disconnect_github(db_session, user_id=user.id) is True
+    assert get_connection(db_session, user_id=user.id) is None
+    assert disconnect_github(db_session, user_id=user.id) is False
 
 
 def test_github_sync_skips_node_modules(db_session):
@@ -465,15 +484,20 @@ def test_github_sync_skips_node_modules(db_session):
             return {"sha": "commit123"}
         raise AssertionError(path)
 
-    with patch("app.services.ingestion_service.run_ingest_document_record") as mock_ingest:
-        with patch("app.services.github_connector_service._github_get", side_effect=fake_github_get):
+    with patch("app.services.ingestion_queue.dispatch_document_ingestion") as mock_dispatch:
+        with patch("app.services.ingestion_queue.ingest_queue_enabled", return_value=True):
             with patch(
-                "app.services.github_connector_service._download_repo_tarball",
-                return_value=tarball,
+                "app.core.app_settings.get_settings",
+                return_value=MagicMock(INGEST_IN_BACKGROUND=True),
             ):
-                result = sync_repository(db_session, user=user, repo_full_name="acme/app")
+                with patch("app.services.github_connector_service._github_get", side_effect=fake_github_get):
+                    with patch(
+                        "app.services.github_connector_service._download_repo_tarball",
+                        return_value=tarball,
+                    ):
+                        result = sync_repository(db_session, user=user, repo_full_name="acme/app")
     assert result["files_indexed"] == 1
-    mock_ingest.assert_called_once()
+    mock_dispatch.assert_called_once()
 
 
 def _make_test_tarball(files: dict[str, str]) -> bytes:
