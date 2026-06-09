@@ -1,10 +1,13 @@
 import { sanitizeChatError, sanitizeRateLimitError } from "@/lib/user-facing-errors";
 import {
   AUTH_EXPIRED_MESSAGE,
+  getAccessToken,
   getCsrfToken,
+  getRefreshToken,
   getSession,
   handleAuthExpiration,
   persistSession,
+  updateSessionTokens,
 } from "@/lib/auth";
 
 const API_BASE =
@@ -62,7 +65,17 @@ function shouldTriggerAuthExpiration(path: string): boolean {
 
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken() {
+function resolveAuthToken(token?: string | null): string | null {
+  if (token) return token;
+  return getAccessToken();
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    return null;
+  }
+
   if (!refreshPromise) {
     refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
       method: "POST",
@@ -71,8 +84,18 @@ async function refreshAccessToken() {
         "Content-Type": "application/json",
         ...(getCsrfToken() ? { "X-CSRF-Token": getCsrfToken()! } : {}),
       },
+      body: JSON.stringify({ refresh_token: refreshToken }),
     })
-      .then(async (response) => (response.ok ? "ok" : null))
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const body = (await response.json()) as {
+          access_token?: string;
+          refresh_token?: string;
+        };
+        if (!body.access_token) return null;
+        updateSessionTokens(body.access_token, body.refresh_token ?? refreshToken);
+        return body.access_token;
+      })
       .catch(() => null)
       .finally(() => {
         refreshPromise = null;
@@ -82,27 +105,20 @@ async function refreshAccessToken() {
 }
 
 export async function fetchAuthSession() {
-  try {
-    return await apiRequest<{
-      id: number;
-      username: string;
-      email: string;
-      name: string;
-    }>("/auth/session", { credentials: "include" }, null, false);
-  } catch (error) {
-    if (error instanceof AuthExpiredError) {
-      const refreshed = await refreshAccessToken();
-      if (refreshed) {
-        return apiRequest<{
-          id: number;
-          username: string;
-          email: string;
-          name: string;
-        }>("/auth/session", { credentials: "include" }, null, false);
-      }
+  const accessToken = getAccessToken();
+  if (!accessToken) {
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) {
+      throw new AuthExpiredError("Unable to establish session. Please try signing in again.");
     }
-    throw error;
   }
+
+  return apiRequest<{
+    id: number;
+    username: string;
+    email: string;
+    name: string;
+  }>("/auth/session", { credentials: "include" }, resolveAuthToken(), false);
 }
 
 async function parseResponseBody(response: Response) {
@@ -123,9 +139,10 @@ export async function apiRequest<T>(
   retryAuth = true
 ): Promise<T> {
   const headers = new Headers(options.headers);
+  const authToken = resolveAuthToken(token);
 
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+  if (authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
   }
 
   const csrf = getCsrfToken();
@@ -159,7 +176,7 @@ export async function apiRequest<T>(
       if (retryAuth && !path.startsWith("/auth/")) {
         const refreshed = await refreshAccessToken();
         if (refreshed) {
-          return apiRequest<T>(path, options, token, false);
+          return apiRequest<T>(path, options, refreshed, false);
         }
       }
       if (shouldTriggerAuthExpiration(path)) {
@@ -188,10 +205,14 @@ export async function apiRequest<T>(
 }
 
 export async function logoutSession() {
+  const refreshToken = getRefreshToken();
   return apiRequest<{ message: string }>(
     "/auth/logout",
-    { method: "POST", body: JSON.stringify({}) },
-    null,
+    {
+      method: "POST",
+      body: JSON.stringify(refreshToken ? { refresh_token: refreshToken } : {}),
+    },
+    resolveAuthToken(),
     false
   );
 }
@@ -939,8 +960,9 @@ export async function streamChat({
     "Content-Type": "application/json",
   });
 
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+  const authToken = resolveAuthToken(token);
+  if (authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
   }
   const csrf = getCsrfToken();
   if (csrf) headers.set("X-CSRF-Token", csrf);
@@ -1398,7 +1420,8 @@ export async function cancelWorkspaceSubscription(token?: string | null) {
 
 export async function downloadWorkspaceInvoice(invoiceId: number, token?: string | null) {
   const headers = new Headers();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const authToken = resolveAuthToken(token);
+  if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
   const response = await fetch(`${API_BASE}/settings/billing/invoices/${invoiceId}/download`, {
     headers,
   });

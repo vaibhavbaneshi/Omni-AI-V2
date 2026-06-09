@@ -16,8 +16,9 @@ function AuthCallbackContent() {
     const error = searchParams.get("error");
     const next = searchParams.get("next") || "/dashboard";
     const status = searchParams.get("status");
-    const legacyToken = searchParams.get("token");
-    const legacyEmail = searchParams.get("email");
+    const accessToken = searchParams.get("token");
+    const refreshToken = searchParams.get("refresh_token");
+    const email = searchParams.get("email");
 
     if (error) {
       const safeError = sanitizeAuthError(error);
@@ -28,17 +29,19 @@ function AuthCallbackContent() {
       return () => window.clearTimeout(timeout);
     }
 
-    if (legacyToken && legacyEmail) {
+    if (accessToken && email) {
       createSession({
-        email: legacyEmail,
-        name: searchParams.get("name") || legacyEmail.split("@")[0] || "User",
-        username: searchParams.get("username") || legacyEmail,
+        email,
+        name: searchParams.get("name") || email.split("@")[0] || "User",
+        username: searchParams.get("username") || email,
+        token: accessToken,
+        refreshToken,
       });
       router.replace(next.startsWith("/") ? next : "/dashboard");
       return;
     }
 
-    if (status === "ok" || legacyToken) {
+    if (status === "ok") {
       fetchAuthSession()
         .then((profile) => {
           createSession({

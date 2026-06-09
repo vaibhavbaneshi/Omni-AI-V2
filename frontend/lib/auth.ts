@@ -8,7 +8,7 @@ export type OmniSession = {
   email: string;
   username: string;
   createdAt: string;
-  /** @deprecated Auth uses HttpOnly cookies; kept for API compatibility */
+  /** Bearer access token — used when frontend and API are on different origins. */
   token?: string | null;
   refreshToken?: string | null;
 };
@@ -37,6 +37,8 @@ export function getSession(): OmniSession | null {
       email: parsed.email,
       username: parsed.username || parsed.email,
       createdAt: parsed.createdAt || new Date().toISOString(),
+      token: parsed.token ?? null,
+      refreshToken: parsed.refreshToken ?? null,
     };
   } catch {
     return null;
@@ -55,20 +57,44 @@ export function persistSession(session: OmniSession) {
   return session;
 }
 
+export function getAccessToken(): string | null {
+  return getSession()?.token ?? null;
+}
+
+export function getRefreshToken(): string | null {
+  return getSession()?.refreshToken ?? null;
+}
+
+export function updateSessionTokens(accessToken: string, refreshToken?: string | null) {
+  const session = getSession();
+  if (!session) return null;
+  return persistSession({
+    ...session,
+    token: accessToken,
+    refreshToken: refreshToken ?? session.refreshToken ?? null,
+  });
+}
+
 export function createSession({
   name,
   email,
   username,
+  token,
+  refreshToken,
 }: {
   name?: string;
   email: string;
   username?: string;
+  token?: string | null;
+  refreshToken?: string | null;
 }) {
   return persistSession({
     name: name?.trim() || email.split("@")[0] || "User",
     email,
     username: username || email,
     createdAt: new Date().toISOString(),
+    token: token ?? null,
+    refreshToken: refreshToken ?? null,
   });
 }
 

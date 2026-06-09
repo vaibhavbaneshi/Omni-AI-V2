@@ -16,7 +16,7 @@ CSRF_COOKIE = "omniai_csrf"
 CSRF_HEADER = "X-CSRF-Token"
 
 
-def _is_cross_origin_auth() -> bool:
+def is_cross_origin_auth() -> bool:
     """True when the SPA and API are on different origins (e.g. Vercel + Railway)."""
     settings = get_settings()
     try:
@@ -35,7 +35,7 @@ def _cookie_secure() -> bool:
 
 
 def _cookie_samesite() -> str:
-    if _cookie_secure() or _is_cross_origin_auth():
+    if _cookie_secure() or is_cross_origin_auth():
         return "none"
     return "lax"
 

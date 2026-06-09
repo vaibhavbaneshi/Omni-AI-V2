@@ -12,6 +12,8 @@ from app.core.cors_utils import cors_headers_for_request
 SAFE_PREFIXES = (
     "/auth/github",
     "/auth/google",
+    "/auth/refresh",
+    "/auth/logout",
     "/health",
     "/docs",
     "/openapi.json",
@@ -26,6 +28,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
         if any(path.startswith(prefix) for prefix in SAFE_PREFIXES):
+            return await call_next(request)
+
+        auth_header = (request.headers.get("authorization") or "").strip()
+        if auth_header.lower().startswith("bearer "):
             return await call_next(request)
 
         if ACCESS_COOKIE not in request.cookies:

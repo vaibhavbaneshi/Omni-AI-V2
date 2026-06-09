@@ -24,10 +24,17 @@ describe("auth helpers", () => {
     expect(getCsrfToken()).toBe("test-token-value");
   });
 
-  it("creates and reads session profile", () => {
-    createSession({ email: "user@example.com", name: "User" });
+  it("creates and reads session profile with tokens", () => {
+    createSession({
+      email: "user@example.com",
+      name: "User",
+      token: "access-token",
+      refreshToken: "refresh-token",
+    });
     const session = getSession();
     expect(session?.email).toBe("user@example.com");
+    expect(session?.token).toBe("access-token");
+    expect(session?.refreshToken).toBe("refresh-token");
     expect(isAuthenticated()).toBe(true);
   });
 

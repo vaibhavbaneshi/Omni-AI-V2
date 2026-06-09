@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.cookie_auth import (
     clear_auth_cookies,
     get_refresh_token_from_request,
+    is_cross_origin_auth,
     set_auth_cookies,
 )
 from app.core.app_settings import get_settings
@@ -81,29 +82,34 @@ def _redirect_to_frontend_success(
     next_path: str,
 ) -> RedirectResponse:
     settings = get_oauth_settings()
-    params = urlencode({"next": next_path, "status": "ok"})
-    response = RedirectResponse(
+    use_cookie_auth = get_settings().AUTH_COOKIE_ENABLED and not is_cross_origin_auth()
+
+    if use_cookie_auth:
+        params = urlencode({"next": next_path, "status": "ok"})
+        response = RedirectResponse(
+            f"{settings['frontend_url']}/auth/callback?{params}",
+            status_code=302,
+        )
+        set_auth_cookies(response, access_token=token, refresh_token=refresh_token)
+        return response
+
+    # Cross-origin SPA + API: browsers block third-party cookies, so pass tokens
+    # to the frontend callback for Bearer auth (stored in sessionStorage).
+    params = urlencode(
+        {
+            "token": token,
+            "refresh_token": refresh_token,
+            "email": email,
+            "name": name,
+            "username": username,
+            "next": next_path,
+            "status": "ok",
+        }
+    )
+    return RedirectResponse(
         f"{settings['frontend_url']}/auth/callback?{params}",
         status_code=302,
     )
-    if get_settings().AUTH_COOKIE_ENABLED:
-        set_auth_cookies(response, access_token=token, refresh_token=refresh_token)
-    else:
-        legacy = urlencode(
-            {
-                "token": token,
-                "refresh_token": refresh_token,
-                "email": email,
-                "name": name,
-                "username": username,
-                "next": next_path,
-            }
-        )
-        response = RedirectResponse(
-            f"{settings['frontend_url']}/auth/callback?{legacy}",
-            status_code=302,
-        )
-    return response
 
 
 def _client_ip(request: Request) -> str | None:
