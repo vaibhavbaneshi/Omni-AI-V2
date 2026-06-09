@@ -6,7 +6,6 @@ import io
 import logging
 import os
 import tarfile
-import tempfile
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -15,6 +14,7 @@ import httpx
 from sqlalchemy.orm import Session
 from app.core.app_settings import get_settings
 from app.core.oauth_config import get_oauth_settings
+from app.core.upload_storage import upload_staging_root
 from app.models.document import DocumentCollection, DocumentRecord
 from app.models.github_connector import GitHubConnection, GitHubRepositorySync
 from app.models.user import User
@@ -369,6 +369,10 @@ def sync_repository(
             workspace_id=workspace_id,
             session_id=session_id,
         )
+        _ensure_sync_indexed_files(
+            repo_full_name=repo_full_name,
+            index_stats=index_stats,
+        )
 
         sync.last_sync_at = datetime.utcnow()
         sync.last_commit_sha = commit_sha
@@ -407,6 +411,29 @@ def sync_repository(
         message = str(exc).strip() or "GitHub sync failed."
         _mark_sync_failed(db, sync=sync, error=message)
         raise ValueError(message) from exc
+
+
+def _ensure_sync_indexed_files(*, repo_full_name: str, index_stats: dict[str, Any]) -> None:
+    indexed = int(index_stats.get("files_indexed") or 0)
+    if indexed > 0:
+        return
+
+    candidates = int(index_stats.get("candidates_seen") or 0)
+    tarball_files = int(index_stats.get("tarball_files") or 0)
+    first_error = index_stats.get("first_error")
+    if candidates > 0:
+        detail = first_error or "document writes failed on the server"
+        raise ValueError(
+            f"Found {candidates} source files in {repo_full_name} but indexed 0. {detail}"
+        )
+    if tarball_files > 0:
+        raise ValueError(
+            f"GitHub archive for {repo_full_name} had {tarball_files} files but none were eligible to index."
+        )
+    raise ValueError(
+        f"GitHub returned no indexable files for {repo_full_name}. "
+        f"Revoke Omni-AI at {github_revoke_url()}, reconnect, and sync again."
+    )
 
 
 def _mark_sync_failed(db: Session, *, sync: GitHubRepositorySync | None, error: str) -> None:
@@ -490,8 +517,11 @@ def _index_repo_from_tarball(
         "skipped_too_large": 0,
         "candidates_seen": 0,
         "tarball_members": 0,
+        "tarball_files": 0,
         "truncated": 0,
+        "first_error": None,
     }
+    pending_document_ids: list[int] = []
 
     with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as archive:
         members = archive.getmembers()
@@ -543,7 +573,7 @@ def _index_repo_from_tarball(
                 text = extracted.read().decode("utf-8", errors="replace")
                 if not text.strip():
                     continue
-                _index_github_file(
+                document_id = _index_github_file(
                     db,
                     user=user,
                     collection_id=collection_id,
@@ -552,10 +582,17 @@ def _index_repo_from_tarball(
                     repo_full_name=repo_full_name,
                     path=relative_path,
                     text=text,
+                    dispatch_ingestion=False,
+                    auto_commit=False,
                 )
+                pending_document_ids.append(document_id)
                 stats["files_indexed"] += 1
+                if stats["files_indexed"] % 25 == 0:
+                    db.commit()
             except Exception as exc:
                 stats["skipped_files"] += 1
+                if stats["first_error"] is None:
+                    stats["first_error"] = f"{relative_path}: {exc}"
                 logger.warning(
                     "Skipped GitHub file %s/%s: %s",
                     repo_full_name,
@@ -563,7 +600,41 @@ def _index_repo_from_tarball(
                     exc,
                 )
 
+    if pending_document_ids:
+        db.commit()
+    _dispatch_github_ingestion(db, pending_document_ids)
     return stats
+
+
+def _dispatch_github_ingestion(db: Session, document_ids: list[int]) -> None:
+    if not document_ids:
+        return
+
+    from app.core.app_settings import get_settings
+    from app.services.ingestion_queue import dispatch_document_ingestion, ingest_queue_enabled
+
+    settings = get_settings()
+    if settings.INGEST_IN_BACKGROUND and ingest_queue_enabled():
+        for document_id in document_ids:
+            dispatch_document_ingestion(db, document_id)
+        return
+
+    if not settings.INGEST_IN_BACKGROUND:
+        from app.services.ingestion_service import run_ingest_document_record
+
+        for document_id in document_ids[:5]:
+            run_ingest_document_record(db, document_id)
+        if len(document_ids) > 5:
+            logger.info(
+                "Queued %s GitHub documents for later ingestion (dev batch limit reached)",
+                len(document_ids) - 5,
+            )
+        return
+
+    logger.warning(
+        "Ingest queue unavailable; %s GitHub documents saved as queued without worker dispatch",
+        len(document_ids),
+    )
 
 
 def _download_repo_tarball(token: str, repo_full_name: str, branch: str) -> bytes:
@@ -650,39 +721,64 @@ def _index_github_file(
     repo_full_name: str,
     path: str,
     text: str,
-) -> None:
+    dispatch_ingestion: bool = True,
+    auto_commit: bool = True,
+) -> int:
     filename = f"{repo_full_name}/{path}".replace("/", "__")
-    with tempfile.NamedTemporaryFile(mode="w", suffix=os.path.splitext(path)[1] or ".txt", delete=False) as tmp:
-        tmp.write(text)
-        storage_path = tmp.name
-
-    document = DocumentRecord(
-        user_id=user.id,
-        workspace_id=workspace_id,
-        collection_id=collection_id,
-        session_id=session_id,
-        filename=filename,
-        storage_path=storage_path,
-        file_size=len(text.encode("utf-8")),
-        chunks_created=0,
-        indexing_stage="queued",
-        security_status="approved",
+    staging_dir = os.path.join(
+        upload_staging_root(),
+        "github",
+        str(user.id),
+        repo_full_name.replace("/", "__"),
     )
-    db.add(document)
-    db.commit()
-    db.refresh(document)
+    os.makedirs(staging_dir, exist_ok=True)
+    storage_path = os.path.join(staging_dir, filename)
+    if len(storage_path) > 240:
+        storage_path = os.path.join(staging_dir, filename[-200:])
 
-    from app.services.ingestion_queue import dispatch_document_ingestion, ingest_queue_enabled
-    from app.core.app_settings import get_settings
-
-    settings = get_settings()
-    if settings.INGEST_IN_BACKGROUND and ingest_queue_enabled():
-        dispatch_document_ingestion(db, document.id)
-    else:
-        logger.warning(
-            "Ingest queue unavailable; GitHub document %s saved as queued without worker dispatch",
-            document.id,
+    existing = (
+        db.query(DocumentRecord)
+        .filter(
+            DocumentRecord.user_id == user.id,
+            DocumentRecord.collection_id == collection_id,
+            DocumentRecord.filename == filename,
         )
+        .first()
+    )
+    if existing:
+        with open(storage_path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        existing.storage_path = storage_path
+        existing.file_size = len(text.encode("utf-8"))
+        existing.indexing_stage = "queued"
+        existing.indexing_error = None
+        document = existing
+    else:
+        with open(storage_path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        document = DocumentRecord(
+            user_id=user.id,
+            workspace_id=workspace_id,
+            collection_id=collection_id,
+            session_id=session_id,
+            filename=filename,
+            storage_path=storage_path,
+            file_size=len(text.encode("utf-8")),
+            chunks_created=0,
+            indexing_stage="queued",
+            security_status="approved",
+        )
+        db.add(document)
+
+    if auto_commit:
+        db.commit()
+        db.refresh(document)
+    else:
+        db.flush()
+
+    if dispatch_ingestion and auto_commit:
+        _dispatch_github_ingestion(db, [document.id])
+    return document.id
 
 
 def _should_skip_repo_path(path: str) -> bool:
