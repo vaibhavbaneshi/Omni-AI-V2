@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import io
+import tarfile
 import zipfile
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -401,7 +403,7 @@ def test_github_list_repositories(db_session):
 @patch("app.services.ingestion_service.run_ingest_document_record")
 def test_github_sync_repository_indexes_files(mock_ingest, db_session):
     user = UserFactory()
-    connection = save_connection(
+    save_connection(
         db_session,
         user_id=user.id,
         github_user_id="1",
@@ -410,37 +412,79 @@ def test_github_sync_repository_indexes_files(mock_ingest, db_session):
     )
 
     commit_sha = "abc123"
-    encoded = base64.b64encode(b"# Hello\n").decode()
+    tarball = _make_test_tarball(
+        {
+            "README.md": "# Hello\n",
+            "frontend/src/App.jsx": "export default function App() {}",
+        }
+    )
 
     def fake_github_get(token, path, params=None):
         if path == "/repos/acme/docs":
             return {"default_branch": "main"}
         if "/commits/" in path:
             return {"sha": commit_sha}
-        if "/git/trees/" in path:
-            return {
-                "tree": [
-                    {"type": "blob", "path": "README.md", "size": 20, "sha": "blob-readme"},
-                    {"type": "blob", "path": "frontend/src/App.jsx", "size": 40, "sha": "blob-app"},
-                    {"type": "tree", "path": "src", "size": 0},
-                ]
-            }
-        if "/git/blobs/blob-readme" in path:
-            return {"encoding": "base64", "content": encoded}
-        if "/git/blobs/blob-app" in path:
-            return {"encoding": "base64", "content": base64.b64encode(b"export default function App() {}").decode()}
         raise AssertionError(f"Unexpected path: {path}")
 
     with patch("app.services.github_connector_service._github_get", side_effect=fake_github_get):
-        result = sync_repository(
-            db_session,
-            user=user,
-            repo_full_name="acme/docs",
-            workspace_id="default",
-        )
+        with patch(
+            "app.services.github_connector_service._download_repo_tarball",
+            return_value=tarball,
+        ):
+            result = sync_repository(
+                db_session,
+                user=user,
+                repo_full_name="acme/docs",
+                workspace_id="default",
+            )
     assert result["status"] == "complete"
     assert result["files_indexed"] == 2
     assert mock_ingest.call_count == 2
+
+
+def test_github_sync_skips_node_modules(db_session):
+    user = UserFactory()
+    save_connection(
+        db_session,
+        user_id=user.id,
+        github_user_id="1",
+        github_login="dev",
+        access_token="token",
+    )
+    tarball = _make_test_tarball(
+        {
+            "node_modules/react/index.js": "skip",
+            "backend/server.js": "console.log('ok')",
+        }
+    )
+
+    def fake_github_get(token, path, params=None):
+        if path == "/repos/acme/app":
+            return {"default_branch": "main"}
+        if "/commits/" in path:
+            return {"sha": "commit123"}
+        raise AssertionError(path)
+
+    with patch("app.services.ingestion_service.run_ingest_document_record") as mock_ingest:
+        with patch("app.services.github_connector_service._github_get", side_effect=fake_github_get):
+            with patch(
+                "app.services.github_connector_service._download_repo_tarball",
+                return_value=tarball,
+            ):
+                result = sync_repository(db_session, user=user, repo_full_name="acme/app")
+    assert result["files_indexed"] == 1
+    mock_ingest.assert_called_once()
+
+
+def _make_test_tarball(files: dict[str, str]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for path, content in files.items():
+            payload = content.encode("utf-8")
+            info = tarfile.TarInfo(name=f"acme-docs-main/{path}")
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
 
 
 def test_github_sync_repository_returns_unchanged(db_session):
@@ -476,41 +520,6 @@ def test_github_sync_repository_returns_unchanged(db_session):
         result = sync_repository(db_session, user=user, repo_full_name="acme/docs")
     assert result["status"] == "unchanged"
     assert result["files_indexed"] == 3
-
-
-def test_github_sync_skips_node_modules(db_session):
-    user = UserFactory()
-    save_connection(
-        db_session,
-        user_id=user.id,
-        github_user_id="1",
-        github_login="dev",
-        access_token="token",
-    )
-
-    def fake_github_get(token, path, params=None):
-        if path == "/repos/acme/app":
-            return {"default_branch": "main"}
-        if "/commits/" in path:
-            return {"sha": "commit123"}
-        if "/git/trees/" in path:
-            return {
-                "tree": [
-                    {"type": "blob", "path": "node_modules/react/index.js", "size": 20, "sha": "skip"},
-                    {"type": "blob", "path": "backend/server.js", "size": 30, "sha": "blob-server"},
-                ]
-            }
-        if "/git/blobs/blob-server" in path:
-            import base64
-
-            return {"encoding": "base64", "content": base64.b64encode(b"console.log('ok')").decode()}
-        raise AssertionError(path)
-
-    with patch("app.services.ingestion_service.run_ingest_document_record") as mock_ingest:
-        with patch("app.services.github_connector_service._github_get", side_effect=fake_github_get):
-            result = sync_repository(db_session, user=user, repo_full_name="acme/app")
-    assert result["files_indexed"] == 1
-    mock_ingest.assert_called_once()
 
 
 def test_github_sync_requires_connection(db_session):

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import os
+import tarfile
 import tempfile
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from sqlalchemy.orm import Session
@@ -84,6 +86,15 @@ SKIP_PATH_SEGMENTS = {
     ".pnpm-store",
 }
 MAX_INDEXABLE_FILE_BYTES = 512_000
+MAX_FILES_PER_SYNC = 500
+SKIP_FILENAMES = {
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "poetry.lock",
+    "cargo.lock",
+    ".coverage",
+}
 
 
 def github_oauth_redirect_uri() -> str:
@@ -214,6 +225,11 @@ def list_repositories(db: Session, *, user_id: int) -> list[dict[str, Any]]:
             "files_indexed": (
                 syncs[repo["full_name"]].files_indexed if repo["full_name"] in syncs else 0
             ),
+            "candidates_seen": (
+                (syncs[repo["full_name"]].sync_metadata or {}).get("candidates_seen")
+                if repo["full_name"] in syncs and syncs[repo["full_name"]].sync_metadata
+                else None
+            ),
             "last_sync_at": (
                 syncs[repo["full_name"]].last_sync_at.isoformat()
                 if repo["full_name"] in syncs and syncs[repo["full_name"]].last_sync_at
@@ -275,70 +291,26 @@ def sync_repository(
         sync.sync_metadata = None
         db.commit()
 
-        tree = _github_get(
-            connection.access_token,
-            f"/repos/{repo_full_name}/git/trees/{commit_sha}",
-            params={"recursive": "1"},
+        index_stats = _index_repo_from_tarball(
+            db,
+            connection=connection,
+            user=user,
+            repo_full_name=repo_full_name,
+            branch=branch,
+            collection_id=collection.id,
+            workspace_id=workspace_id,
+            session_id=session_id,
         )
-        if tree.get("truncated"):
-            logger.warning("GitHub tree truncated for %s — indexing partial file list", repo_full_name)
-
-        files_indexed = 0
-        skipped_files = 0
-        skipped_ignored_path = 0
-        skipped_extension = 0
-        skipped_too_large = 0
-        for item in tree.get("tree", []):
-            if item.get("type") != "blob":
-                continue
-            path = item.get("path", "")
-            if _should_skip_repo_path(path):
-                skipped_ignored_path += 1
-                continue
-            ext = os.path.splitext(path)[1].lower()
-            if ext == "" and os.path.basename(path).lower() == "dockerfile":
-                ext = ".dockerfile"
-            if ext not in INDEXABLE_EXTENSIONS:
-                skipped_extension += 1
-                continue
-            size = int(item.get("size") or 0)
-            if size > MAX_INDEXABLE_FILE_BYTES:
-                skipped_too_large += 1
-                continue
-            blob_sha = item.get("sha")
-            if not blob_sha:
-                skipped_files += 1
-                continue
-            try:
-                text = _fetch_blob_text(connection.access_token, repo_full_name, blob_sha)
-                if not text.strip():
-                    continue
-                _index_github_file(
-                    db,
-                    user=user,
-                    collection_id=collection.id,
-                    workspace_id=workspace_id,
-                    session_id=session_id,
-                    repo_full_name=repo_full_name,
-                    path=path,
-                    text=text,
-                )
-                files_indexed += 1
-            except Exception as exc:
-                skipped_files += 1
-                logger.warning("Skipped GitHub file %s/%s: %s", repo_full_name, path, exc)
 
         sync.last_sync_at = datetime.utcnow()
         sync.last_commit_sha = commit_sha
         sync.sync_status = "complete"
-        sync.files_indexed = files_indexed
+        sync.files_indexed = index_stats["files_indexed"]
         sync.sync_metadata = {
             "branch": branch,
             "commit_sha": commit_sha,
-            "skipped_files": skipped_files,
-            "skipped_ignored_path": skipped_ignored_path,
-            "skipped_extension": skipped_extension,
-            "skipped_too_large": skipped_too_large,
+            "method": "tarball",
+            **index_stats,
         }
         db.commit()
 
@@ -348,16 +320,16 @@ def sync_repository(
             user_id=user.id,
             detail={
                 "repo": repo_full_name,
-                "files_indexed": files_indexed,
-                "skipped_files": skipped_files,
+                "files_indexed": index_stats["files_indexed"],
                 "commit_sha": commit_sha,
+                "method": "tarball",
             },
         )
         return {
             "status": "complete",
-            "files_indexed": files_indexed,
-            "skipped_files": skipped_files,
+            "files_indexed": index_stats["files_indexed"],
             "commit_sha": commit_sha,
+            **index_stats,
         }
     except httpx.HTTPStatusError as exc:
         message = _github_http_error_message(exc, repo_full_name=repo_full_name)
@@ -409,10 +381,134 @@ def run_github_sync_job(*, user_id: int, repo_full_name: str, workspace_id: str 
             workspace_id=workspace_id,
             session_id=None,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Background GitHub sync failed for %s (user=%s)", repo_full_name, user_id)
+        sync = (
+            db.query(GitHubRepositorySync)
+            .filter(
+                GitHubRepositorySync.user_id == user_id,
+                GitHubRepositorySync.repo_full_name == repo_full_name,
+            )
+            .first()
+        )
+        if sync and sync.sync_status == "running":
+            _mark_sync_failed(db, sync=sync, error=str(exc)[:500] or "GitHub sync failed.")
     finally:
         db.close()
+
+
+def _index_repo_from_tarball(
+    db: Session,
+    *,
+    connection: GitHubConnection,
+    user: User,
+    repo_full_name: str,
+    branch: str,
+    collection_id: int,
+    workspace_id: str,
+    session_id: int | None,
+) -> dict[str, int]:
+    archive_bytes = _download_repo_tarball(connection.access_token, repo_full_name, branch)
+    stats = {
+        "files_indexed": 0,
+        "skipped_files": 0,
+        "skipped_ignored_path": 0,
+        "skipped_extension": 0,
+        "skipped_too_large": 0,
+        "candidates_seen": 0,
+        "truncated": 0,
+    }
+
+    with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as archive:
+        root_prefix = _tarball_root_prefix(archive.getmembers())
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            relative_path = _tarball_relative_path(member.name, root_prefix)
+            if not relative_path:
+                continue
+            stats["candidates_seen"] += 1
+            if _should_skip_repo_path(relative_path):
+                stats["skipped_ignored_path"] += 1
+                continue
+            basename = os.path.basename(relative_path)
+            if basename.lower() in SKIP_FILENAMES:
+                stats["skipped_files"] += 1
+                continue
+            ext = os.path.splitext(relative_path)[1].lower()
+            if ext == "" and basename.lower() == "dockerfile":
+                ext = ".dockerfile"
+            if ext not in INDEXABLE_EXTENSIONS:
+                stats["skipped_extension"] += 1
+                continue
+            if member.size and member.size > MAX_INDEXABLE_FILE_BYTES:
+                stats["skipped_too_large"] += 1
+                continue
+            if stats["files_indexed"] >= MAX_FILES_PER_SYNC:
+                stats["truncated"] = 1
+                break
+            try:
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    stats["skipped_files"] += 1
+                    continue
+                text = extracted.read().decode("utf-8", errors="replace")
+                if not text.strip():
+                    continue
+                _index_github_file(
+                    db,
+                    user=user,
+                    collection_id=collection_id,
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    repo_full_name=repo_full_name,
+                    path=relative_path,
+                    text=text,
+                )
+                stats["files_indexed"] += 1
+            except Exception as exc:
+                stats["skipped_files"] += 1
+                logger.warning(
+                    "Skipped GitHub file %s/%s: %s",
+                    repo_full_name,
+                    relative_path,
+                    exc,
+                )
+
+    return stats
+
+
+def _download_repo_tarball(token: str, repo_full_name: str, branch: str) -> bytes:
+    owner, repo = repo_full_name.split("/", 1)
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/tarball/{quote(branch, safe='')}"
+    last_response: httpx.Response | None = None
+    for auth_scheme in (f"Bearer {token}", f"token {token}"):
+        headers = {
+            "Authorization": auth_scheme,
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        last_response = httpx.get(url, headers=headers, follow_redirects=True, timeout=180)
+        if last_response.status_code != 401:
+            break
+    assert last_response is not None
+    last_response.raise_for_status()
+    return last_response.content
+
+
+def _tarball_root_prefix(members: list[tarfile.TarInfo]) -> str:
+    for member in members:
+        if member.isfile() and "/" in member.name:
+            return member.name.split("/", 1)[0] + "/"
+    return ""
+
+
+def _tarball_relative_path(member_name: str, root_prefix: str) -> str:
+    if root_prefix and member_name.startswith(root_prefix):
+        return member_name[len(root_prefix) :]
+    if "/" in member_name:
+        return member_name.split("/", 1)[1]
+    return member_name
 
 
 def _ensure_collection(db: Session, *, user: User, workspace_id: str) -> DocumentCollection:
@@ -491,7 +587,8 @@ def _fetch_blob_text(token: str, repo_full_name: str, blob_sha: str) -> str:
     if not content:
         return ""
     if payload.get("encoding") == "base64":
-        return base64.b64decode(content).decode("utf-8", errors="replace")
+        cleaned = content.replace("\n", "").replace("\r", "")
+        return base64.b64decode(cleaned).decode("utf-8", errors="replace")
     return str(content)
 
 

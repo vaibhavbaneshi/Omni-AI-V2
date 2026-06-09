@@ -74,11 +74,20 @@ export function GitHubConnectorPanel({
             stopPolling();
             setSyncing(null);
             const count = Number(repo?.files_indexed ?? 0);
-            setSuccess(
-              count > 0
-                ? `Synced ${count} file${count === 1 ? "" : "s"} from ${repoFullName}. Check the GitHub collection in Files.`
-                : `Sync finished for ${repoFullName}, but no indexable source files were found. Try a repo with .js, .jsx, .ts, .md, or .py files outside node_modules.`
-            );
+            const candidates = Number(repo?.candidates_seen ?? 0);
+            if (count > 0) {
+              setSuccess(
+                `Synced ${count} file${count === 1 ? "" : "s"} from ${repoFullName}. Check the GitHub collection in Files.`
+              );
+            } else if (candidates > 0) {
+              setError(
+                `Found ${candidates} source files in ${repoFullName} but indexing failed. Check backend logs or reconnect GitHub.`
+              );
+            } else {
+              setSuccess(
+                `Sync finished for ${repoFullName}, but no indexable source files were found. Reconnect GitHub if this repo is private.`
+              );
+            }
             void onDocumentsRefresh?.();
           } else if (syncStatus === "failed") {
             stopPolling();
