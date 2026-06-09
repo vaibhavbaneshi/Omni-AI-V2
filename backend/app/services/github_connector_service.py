@@ -11,7 +11,6 @@ from urllib.parse import urlencode
 
 import httpx
 from sqlalchemy.orm import Session
-
 from app.core.app_settings import get_settings
 from app.core.oauth_config import get_oauth_settings
 from app.models.document import DocumentCollection, DocumentRecord
@@ -147,6 +146,14 @@ def list_repositories(db: Session, *, user_id: int) -> list[dict[str, Any]]:
             "default_branch": repo.get("default_branch", "main"),
             "description": repo.get("description"),
             "sync_status": syncs.get(repo["full_name"]).sync_status if repo["full_name"] in syncs else "not_synced",
+            "sync_error": (
+                (syncs[repo["full_name"]].sync_metadata or {}).get("error")
+                if repo["full_name"] in syncs and syncs[repo["full_name"]].sync_metadata
+                else None
+            ),
+            "files_indexed": (
+                syncs[repo["full_name"]].files_indexed if repo["full_name"] in syncs else 0
+            ),
             "last_sync_at": (
                 syncs[repo["full_name"]].last_sync_at.isoformat()
                 if repo["full_name"] in syncs and syncs[repo["full_name"]].last_sync_at
@@ -169,11 +176,6 @@ def sync_repository(
     if not connection:
         raise ValueError("GitHub is not connected. Authorize the connector first.")
 
-    repo = _github_get(connection.access_token, f"/repos/{repo_full_name}")
-    branch = repo.get("default_branch", "main")
-    commit = _github_get(connection.access_token, f"/repos/{repo_full_name}/commits/{branch}")
-    commit_sha = commit["sha"]
-
     sync = (
         db.query(GitHubRepositorySync)
         .filter(
@@ -182,69 +184,158 @@ def sync_repository(
         )
         .first()
     )
-    if sync and sync.last_commit_sha == commit_sha and sync.sync_status == "complete":
-        return {"status": "unchanged", "files_indexed": sync.files_indexed, "commit_sha": commit_sha}
 
-    collection = _ensure_collection(db, user=user, workspace_id=workspace_id)
-    if sync is None:
-        sync = GitHubRepositorySync(
-            user_id=user.id,
-            connection_id=connection.id,
-            repo_full_name=repo_full_name,
-            default_branch=branch,
-            workspace_id=workspace_id,
-            collection_id=collection.id,
+    try:
+        repo = _github_get(connection.access_token, f"/repos/{repo_full_name}")
+        branch = repo.get("default_branch", "main")
+        commit = _github_get(connection.access_token, f"/repos/{repo_full_name}/commits/{branch}")
+        commit_sha = commit["sha"]
+
+        if sync and sync.last_commit_sha == commit_sha and sync.sync_status == "complete":
+            return {"status": "unchanged", "files_indexed": sync.files_indexed, "commit_sha": commit_sha}
+
+        collection = _ensure_collection(db, user=user, workspace_id=workspace_id)
+        if sync is None:
+            sync = GitHubRepositorySync(
+                user_id=user.id,
+                connection_id=connection.id,
+                repo_full_name=repo_full_name,
+                default_branch=branch,
+                workspace_id=workspace_id,
+                collection_id=collection.id,
+            )
+            db.add(sync)
+        sync.sync_status = "running"
+        sync.collection_id = collection.id
+        sync.sync_metadata = None
+        db.commit()
+
+        tree = _github_get(
+            connection.access_token,
+            f"/repos/{repo_full_name}/git/trees/{commit_sha}",
+            params={"recursive": "1"},
         )
-        db.add(sync)
-    sync.sync_status = "running"
-    sync.collection_id = collection.id
+        if tree.get("truncated"):
+            logger.warning("GitHub tree truncated for %s — indexing partial file list", repo_full_name)
+
+        files_indexed = 0
+        skipped_files = 0
+        for item in tree.get("tree", []):
+            if item.get("type") != "blob":
+                continue
+            path = item.get("path", "")
+            ext = os.path.splitext(path)[1].lower()
+            if ext not in INDEXABLE_EXTENSIONS:
+                continue
+            if item.get("size", 0) > 512_000:
+                skipped_files += 1
+                continue
+            try:
+                content = _github_get_raw(
+                    connection.access_token,
+                    f"/repos/{repo_full_name}/contents/{path}",
+                    params={"ref": branch},
+                )
+                text = _decode_content(content)
+                if not text.strip():
+                    continue
+                _index_github_file(
+                    db,
+                    user=user,
+                    collection_id=collection.id,
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    repo_full_name=repo_full_name,
+                    path=path,
+                    text=text,
+                )
+                files_indexed += 1
+            except Exception as exc:
+                skipped_files += 1
+                logger.warning("Skipped GitHub file %s/%s: %s", repo_full_name, path, exc)
+
+        sync.last_sync_at = datetime.utcnow()
+        sync.last_commit_sha = commit_sha
+        sync.sync_status = "complete"
+        sync.files_indexed = files_indexed
+        sync.sync_metadata = {
+            "branch": branch,
+            "commit_sha": commit_sha,
+            "skipped_files": skipped_files,
+        }
+        db.commit()
+
+        audit_log(
+            db,
+            action="connector.github.sync",
+            user_id=user.id,
+            detail={
+                "repo": repo_full_name,
+                "files_indexed": files_indexed,
+                "skipped_files": skipped_files,
+                "commit_sha": commit_sha,
+            },
+        )
+        return {
+            "status": "complete",
+            "files_indexed": files_indexed,
+            "skipped_files": skipped_files,
+            "commit_sha": commit_sha,
+        }
+    except httpx.HTTPStatusError as exc:
+        message = _github_http_error_message(exc, repo_full_name=repo_full_name)
+        _mark_sync_failed(db, sync=sync, error=message)
+        raise ValueError(message) from exc
+    except Exception as exc:
+        message = str(exc).strip() or "GitHub sync failed."
+        _mark_sync_failed(db, sync=sync, error=message)
+        raise ValueError(message) from exc
+
+
+def _mark_sync_failed(db: Session, *, sync: GitHubRepositorySync | None, error: str) -> None:
+    if sync is None:
+        return
+    sync.sync_status = "failed"
+    sync.sync_metadata = {"error": error[:500]}
     db.commit()
 
-    tree = _github_get(
-        connection.access_token,
-        f"/repos/{repo_full_name}/git/trees/{commit_sha}",
-        params={"recursive": "1"},
-    )
-    files_indexed = 0
-    for item in tree.get("tree", []):
-        if item.get("type") != "blob":
-            continue
-        path = item.get("path", "")
-        ext = os.path.splitext(path)[1].lower()
-        if ext not in INDEXABLE_EXTENSIONS:
-            continue
-        if item.get("size", 0) > 512_000:
-            continue
-        content = _github_get_raw(connection.access_token, f"/repos/{repo_full_name}/contents/{path}", params={"ref": branch})
-        text = _decode_content(content)
-        if not text.strip():
-            continue
-        _index_github_file(
+
+def _github_http_error_message(exc: httpx.HTTPStatusError, *, repo_full_name: str) -> str:
+    if exc.response.status_code == 401:
+        return "GitHub authorization expired. Sign in with GitHub again or reconnect the connector."
+    if exc.response.status_code == 403:
+        return (
+            f"GitHub denied access to {repo_full_name}. "
+            "Reconnect the connector and grant repository access."
+        )
+    if exc.response.status_code == 404:
+        return f"Repository {repo_full_name} was not found or you do not have access."
+    if exc.response.status_code == 409:
+        return f"Repository {repo_full_name} is empty or has no commits on the default branch."
+    return f"GitHub sync failed ({exc.response.status_code}). Please try again."
+
+
+def run_github_sync_job(*, user_id: int, repo_full_name: str, workspace_id: str = "default") -> None:
+    """Background worker entrypoint — uses its own DB session."""
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            logger.error("GitHub sync aborted: user %s not found", user_id)
+            return
+        sync_repository(
             db,
             user=user,
-            collection_id=collection.id,
-            workspace_id=workspace_id,
-            session_id=session_id,
             repo_full_name=repo_full_name,
-            path=path,
-            text=text,
+            workspace_id=workspace_id,
+            session_id=None,
         )
-        files_indexed += 1
-
-    sync.last_sync_at = datetime.utcnow()
-    sync.last_commit_sha = commit_sha
-    sync.sync_status = "complete"
-    sync.files_indexed = files_indexed
-    sync.sync_metadata = {"branch": branch, "commit_sha": commit_sha}
-    db.commit()
-
-    audit_log(
-        db,
-        action="connector.github.sync",
-        user_id=user.id,
-        detail={"repo": repo_full_name, "files_indexed": files_indexed, "commit_sha": commit_sha},
-    )
-    return {"status": "complete", "files_indexed": files_indexed, "commit_sha": commit_sha}
+    except Exception:
+        logger.exception("Background GitHub sync failed for %s (user=%s)", repo_full_name, user_id)
+    finally:
+        db.close()
 
 
 def _ensure_collection(db: Session, *, user: User, workspace_id: str) -> DocumentCollection:

@@ -269,7 +269,12 @@ export function WorkspaceContextSheet({
             </TabsContent>
 
             <TabsContent value="connectors" className="px-4 py-4">
-              <GitHubConnectorPanel embedded token={token} sessionId={sessionId} />
+              <GitHubConnectorPanel
+                embedded
+                token={token}
+                sessionId={sessionId}
+                onDocumentsRefresh={onRefresh}
+              />
             </TabsContent>
           </ScrollArea>
         </Tabs>

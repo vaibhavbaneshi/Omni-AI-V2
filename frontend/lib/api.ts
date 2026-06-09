@@ -1510,16 +1510,20 @@ export async function listGitHubRepos(token?: string | null) {
 export async function syncGitHubRepo(
   repoFullName: string,
   token?: string | null,
-  options?: { workspaceId?: string; sessionId?: number }
+  options?: { workspaceId?: string }
 ) {
-  return apiRequest<{ status: string; files_indexed?: number }>(
+  return apiRequest<{
+    status: string;
+    message?: string;
+    files_indexed?: number;
+    skipped_files?: number;
+  }>(
     "/connectors/github/sync",
     {
       method: "POST",
       body: JSON.stringify({
         repo_full_name: repoFullName,
         workspace_id: options?.workspaceId ?? "default",
-        session_id: options?.sessionId,
       }),
     },
     token

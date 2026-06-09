@@ -391,7 +391,7 @@ def list_documents(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if session_id is None:
+    if session_id is None and collection_id is None:
         return {"documents": []}
 
     query = (
@@ -399,10 +399,11 @@ def list_documents(
         .filter(
             DocumentRecord.user_id == current_user.id,
             DocumentRecord.workspace_id == workspace_id,
-            DocumentRecord.session_id == session_id,
         )
     )
 
+    if session_id is not None:
+        query = query.filter(DocumentRecord.session_id == session_id)
     if collection_id is not None:
         query = query.filter(DocumentRecord.collection_id == collection_id)
 

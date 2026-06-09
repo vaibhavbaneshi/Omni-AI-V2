@@ -85,28 +85,40 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
   const refresh = useCallback(async (sessionIdOverride?: number | null) => {
     const scopedSessionId = sessionIdOverride ?? numericSessionId;
-    if (!token || !scopedSessionId) {
-      if (scopedSessionId === numericSessionId) {
-        setDocuments([]);
-      }
-      return [];
-    }
 
-    const [documentResult, collectionResult] = await Promise.all([
-      listDocuments(token, { sessionId: scopedSessionId }),
-      listCollections(token),
+    const [collectionResult] = await Promise.all([
+      token ? listCollections(token) : Promise.resolve({ collections: [] as DocumentCollection[] }),
     ]);
 
-    const scopedDocuments = documentResult.documents.filter((document) =>
-      belongsToSession(document, scopedSessionId)
-    );
+    let scopedDocuments: DocumentRecord[] = [];
+    if (token && scopedSessionId) {
+      const documentResult = await listDocuments(token, { sessionId: scopedSessionId });
+      scopedDocuments = documentResult.documents.filter((document) =>
+        belongsToSession(document, scopedSessionId)
+      );
+    }
 
-    if (scopedSessionId === numericSessionId) {
+    const githubCollection = collectionResult.collections.find(
+      (collection) => collection.name === "GitHub"
+    );
+    if (token && githubCollection) {
+      const githubDocs = await listDocuments(token, { collectionId: githubCollection.id });
+      const seen = new Set(scopedDocuments.map((document) => document.id));
+      for (const document of githubDocs.documents) {
+        if (!seen.has(document.id)) {
+          scopedDocuments.push(document);
+          seen.add(document.id);
+        }
+      }
+    }
+
+    if (scopedSessionId === numericSessionId || githubCollection) {
       setDocuments(scopedDocuments);
       setCollections(collectionResult.collections);
 
       if (!activeCollectionId && collectionResult.collections.length > 0) {
-        setActiveCollectionId(collectionResult.collections[0].id);
+        const github = collectionResult.collections.find((item) => item.name === "GitHub");
+        setActiveCollectionId(github?.id ?? collectionResult.collections[0].id);
       }
     }
 

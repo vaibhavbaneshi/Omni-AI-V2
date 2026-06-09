@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -11,23 +13,24 @@ from app.core.app_settings import get_settings
 from app.core.oauth_config import get_oauth_settings
 from app.core.security import get_current_user
 from app.db.session import get_db
+from app.models.github_connector import GitHubRepositorySync
 from app.models.user import User
 from app.services.github_connector_service import (
     build_connector_authorize_url,
     connect_github_account_from_token,
     get_connection,
     list_repositories,
-    sync_repository,
+    run_github_sync_job,
 )
 from app.services.oauth_service import decode_oauth_state, exchange_github_code
 
 router = APIRouter(prefix="/connectors/github", tags=["connectors", "github"])
+logger = logging.getLogger(__name__)
 
 
 class GitHubSyncRequest(BaseModel):
     repo_full_name: str = Field(min_length=3, max_length=256)
     workspace_id: str = "default"
-    session_id: int | None = None
 
 
 @router.get("/status")
@@ -126,16 +129,53 @@ def github_repos(
 @router.post("/sync")
 def github_sync(
     body: GitHubSyncRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    try:
-        return sync_repository(
-            db,
-            user=current_user,
-            repo_full_name=body.repo_full_name,
-            workspace_id=body.workspace_id,
-            session_id=body.session_id,
+    connection = get_connection(db, user_id=current_user.id)
+    if not connection:
+        raise HTTPException(
+            status_code=400,
+            detail="GitHub is not connected. Authorize the connector first.",
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    sync = (
+        db.query(GitHubRepositorySync)
+        .filter(
+            GitHubRepositorySync.user_id == current_user.id,
+            GitHubRepositorySync.repo_full_name == body.repo_full_name,
+        )
+        .first()
+    )
+    if sync and sync.sync_status == "running":
+        return {
+            "status": "running",
+            "message": "Sync already in progress for this repository.",
+            "files_indexed": sync.files_indexed,
+        }
+
+    if sync is None:
+        sync = GitHubRepositorySync(
+            user_id=current_user.id,
+            connection_id=connection.id,
+            repo_full_name=body.repo_full_name,
+            default_branch="main",
+            workspace_id=body.workspace_id,
+        )
+        db.add(sync)
+    sync.sync_status = "running"
+    sync.sync_metadata = None
+    db.commit()
+
+    background_tasks.add_task(
+        run_github_sync_job,
+        user_id=current_user.id,
+        repo_full_name=body.repo_full_name,
+        workspace_id=body.workspace_id,
+    )
+    return {
+        "status": "running",
+        "message": "Sync started. Files will appear in the GitHub collection shortly.",
+        "files_indexed": sync.files_indexed,
+    }
