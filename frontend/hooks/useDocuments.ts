@@ -26,6 +26,18 @@ const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const STALE_INDEXING_MS = 15 * 60 * 1000;
 const SESSION_DOC_LIMIT = 100;
 const COLLECTION_PAGE_SIZE = 40;
+const MAX_INDEXING_STATUS_POLLS = 5;
+const INDEXING_POLL_MS = 3000;
+const COLLECTION_INDEXING_POLL_MS = 8000;
+
+function shouldLoadCollectionDocuments(
+  collectionId: number | null,
+  collections: DocumentCollection[]
+): collectionId is number {
+  if (!collectionId) return false;
+  const collection = collections.find((item) => item.id === collectionId);
+  return Boolean(collection && collection.name !== "Default");
+}
 
 function belongsToSession(document: DocumentRecord, sessionId: number | null): boolean {
   if (!sessionId) return false;
@@ -87,9 +99,12 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
   const currentSessionIdRef = useRef<number | null>(numericSessionId);
   const pollTimerRef = useRef<number | null>(null);
+  const collectionPollTimerRef = useRef<number | null>(null);
   const indexingStartedAtRef = useRef<number | null>(null);
   const activeCollectionIdRef = useRef<number | null>(activeCollectionId);
+  const collectionsRef = useRef<DocumentCollection[]>(collections);
   const collectionPagingRef = useRef(collectionPaging);
+  const collectionDocumentsRef = useRef<DocumentRecord[]>(collectionDocuments);
 
   useEffect(() => {
     currentSessionIdRef.current = numericSessionId;
@@ -102,6 +117,14 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
   useEffect(() => {
     collectionPagingRef.current = collectionPaging;
   }, [collectionPaging]);
+
+  useEffect(() => {
+    collectionsRef.current = collections;
+  }, [collections]);
+
+  useEffect(() => {
+    collectionDocumentsRef.current = collectionDocuments;
+  }, [collectionDocuments]);
 
   const loadCollectionDocuments = useCallback(
     async (collectionId: number, options?: { reset?: boolean; append?: boolean }) => {
@@ -119,29 +142,55 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
           limit: COLLECTION_PAGE_SIZE,
           offset,
         });
-        const nextDocuments =
-          options?.reset || !options?.append
-            ? result.documents
-            : [...collectionDocuments, ...result.documents];
 
-        if (activeCollectionIdRef.current === collectionId) {
-          setCollectionDocuments(nextDocuments);
-          setCollectionPaging({
-            total: result.total ?? nextDocuments.length,
-            hasMore: Boolean(result.has_more),
-            offset: offset + result.documents.length,
-            loading: false,
-          });
+        if (activeCollectionIdRef.current !== collectionId) {
+          return collectionDocumentsRef.current;
         }
+
+        let nextDocuments = result.documents;
+        if (options?.append && !options?.reset) {
+          setCollectionDocuments((current) => {
+            nextDocuments = [...current, ...result.documents];
+            return nextDocuments;
+          });
+        } else {
+          setCollectionDocuments(nextDocuments);
+        }
+
+        setCollectionPaging({
+          total: result.total ?? nextDocuments.length,
+          hasMore: Boolean(result.has_more),
+          offset: offset + result.documents.length,
+          loading: false,
+        });
         return nextDocuments;
-      } catch {
+      } catch (error) {
         if (activeCollectionIdRef.current === collectionId) {
           setCollectionPaging((current) => ({ ...current, loading: false }));
         }
-        return collectionDocuments;
+        if (error instanceof ApiError && error.status === 429) {
+          throw error;
+        }
+        return collectionDocumentsRef.current;
       }
     },
-    [collectionDocuments, token]
+    [token]
+  );
+
+  const selectActiveCollection = useCallback(
+    (collectionId: number | null) => {
+      activeCollectionIdRef.current = collectionId;
+      setActiveCollectionId(collectionId);
+
+      if (!shouldLoadCollectionDocuments(collectionId, collectionsRef.current)) {
+        setCollectionDocuments([]);
+        setCollectionPaging({ total: 0, hasMore: false, offset: 0, loading: false });
+        return;
+      }
+
+      void loadCollectionDocuments(collectionId, { reset: true });
+    },
+    [loadCollectionDocuments]
   );
 
   const refresh = useCallback(async (sessionIdOverride?: number | null) => {
@@ -165,15 +214,19 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     if (scopedSessionId === numericSessionId || !scopedSessionId) {
       setDocuments(scopedDocuments);
       setCollections(collectionResult.collections);
+      collectionsRef.current = collectionResult.collections;
 
-      if (!activeCollectionId && collectionResult.collections.length > 0) {
-        const github = collectionResult.collections.find((item) => item.name === "GitHub");
-        setActiveCollectionId(github?.id ?? collectionResult.collections[0].id);
+      if (!activeCollectionIdRef.current && collectionResult.collections.length > 0) {
+        const preferred =
+          collectionResult.collections.find((item) => item.name === "Default") ??
+          collectionResult.collections[0];
+        activeCollectionIdRef.current = preferred.id;
+        setActiveCollectionId(preferred.id);
       }
     }
 
     const collectionId = activeCollectionIdRef.current;
-    if (token && collectionId) {
+    if (shouldLoadCollectionDocuments(collectionId, collectionResult.collections)) {
       await loadCollectionDocuments(collectionId, { reset: true });
     } else {
       setCollectionDocuments([]);
@@ -181,12 +234,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     }
 
     return scopedDocuments;
-  }, [activeCollectionId, loadCollectionDocuments, numericSessionId, token]);
-
-  useEffect(() => {
-    if (!token || !activeCollectionId) return;
-    void loadCollectionDocuments(activeCollectionId, { reset: true });
-  }, [activeCollectionId, loadCollectionDocuments, token]);
+  }, [loadCollectionDocuments, numericSessionId, token]);
 
   useEffect(() => {
     setDocuments([]);
@@ -198,6 +246,10 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     if (pollTimerRef.current) {
       window.clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
+    }
+    if (collectionPollTimerRef.current) {
+      window.clearInterval(collectionPollTimerRef.current);
+      collectionPollTimerRef.current = null;
     }
 
     if (!token || !numericSessionId) return;
@@ -224,9 +276,11 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
   const pollIndexingDocuments = useCallback(async () => {
     if (!token || !numericSessionId) return;
 
-    const pending = documents.filter(
-      (document) => isDocumentIndexing(document) && belongsToSession(document, numericSessionId)
-    );
+    const pending = documents
+      .filter(
+        (document) => isDocumentIndexing(document) && belongsToSession(document, numericSessionId)
+      )
+      .slice(0, MAX_INDEXING_STATUS_POLLS);
     if (pending.length === 0) {
       return;
     }
@@ -241,10 +295,21 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
           if (error instanceof ApiError && error.status === 404) {
             return { id: document.id, missing: true as const };
           }
+          if (error instanceof ApiError && error.status === 429) {
+            return { rateLimited: true as const };
+          }
           return null;
         }
       })
     );
+
+    if (updates.some((update) => update && "rateLimited" in update && update.rateLimited)) {
+      if (pollTimerRef.current) {
+        window.clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      return;
+    }
 
     let becameReady = false;
     let becameFailed = false;
@@ -331,7 +396,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     if (!pollTimerRef.current) {
       pollTimerRef.current = window.setInterval(() => {
         pollIndexingDocuments().catch(() => undefined);
-      }, 1200);
+      }, INDEXING_POLL_MS);
     }
 
     return () => {
@@ -341,6 +406,70 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
       }
     };
   }, [documents, numericSessionId, pollIndexingDocuments, token]);
+
+  const pollCollectionIndexing = useCallback(async () => {
+    const collectionId = activeCollectionIdRef.current;
+    if (!token || !shouldLoadCollectionDocuments(collectionId, collectionsRef.current)) {
+      return;
+    }
+
+    try {
+      const summary = await getDocumentsIndexingSummary(token, { collectionId });
+      const collectionName =
+        collectionsRef.current.find((item) => item.id === collectionId)?.name ?? "collection";
+
+      if (summary.indexing > 0) {
+        setMessage(`Indexing ${summary.indexing} of ${summary.total} files in ${collectionName}...`);
+        return;
+      }
+
+      const hasLocalIndexing = collectionDocumentsRef.current.some(isDocumentIndexing);
+      if (hasLocalIndexing) {
+        await loadCollectionDocuments(collectionId, { reset: true });
+      }
+
+      if (collectionPollTimerRef.current) {
+        window.clearInterval(collectionPollTimerRef.current);
+        collectionPollTimerRef.current = null;
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 429 && collectionPollTimerRef.current) {
+        window.clearInterval(collectionPollTimerRef.current);
+        collectionPollTimerRef.current = null;
+      }
+    }
+  }, [loadCollectionDocuments, token]);
+
+  useEffect(() => {
+    const collectionId = activeCollectionIdRef.current;
+    const shouldPoll =
+      Boolean(token) &&
+      shouldLoadCollectionDocuments(collectionId, collections) &&
+      collectionDocuments.some(isDocumentIndexing);
+
+    if (!shouldPoll) {
+      if (collectionPollTimerRef.current) {
+        window.clearInterval(collectionPollTimerRef.current);
+        collectionPollTimerRef.current = null;
+      }
+      return;
+    }
+
+    pollCollectionIndexing().catch(() => undefined);
+
+    if (!collectionPollTimerRef.current) {
+      collectionPollTimerRef.current = window.setInterval(() => {
+        pollCollectionIndexing().catch(() => undefined);
+      }, COLLECTION_INDEXING_POLL_MS);
+    }
+
+    return () => {
+      if (collectionPollTimerRef.current) {
+        window.clearInterval(collectionPollTimerRef.current);
+        collectionPollTimerRef.current = null;
+      }
+    };
+  }, [collectionDocuments, collections, pollCollectionIndexing, token]);
 
   const upload = async (file: File, options?: { sessionId?: number | null }) => {
     const targetSessionId = options?.sessionId ?? numericSessionId;
@@ -449,7 +578,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
   const addCollection = async (name: string) => {
     const collection = await createCollection(name, token);
     await refresh();
-    setActiveCollectionId(collection.id);
+    selectActiveCollection(collection.id);
     return collection;
   };
 
@@ -479,7 +608,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     collections,
     activeCollectionId,
     activeCollection,
-    setActiveCollectionId,
+    setActiveCollectionId: selectActiveCollection,
     status,
     message,
     isUploadActiveForSession,
