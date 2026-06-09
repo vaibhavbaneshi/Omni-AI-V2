@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Github, Loader2, RefreshCw } from "lucide-react";
+import { Code2, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   getGitHubConnectorAuthorizeUrl,
@@ -78,7 +78,7 @@ export function GitHubConnectorPanel({
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <Github className="size-4 text-foreground" />
+            <Code2 className="size-4 text-foreground" />
             <h3 className="text-[13px] font-semibold">GitHub Connector</h3>
           </div>
           <p className="mt-1 text-[12px] text-muted-foreground/70">
