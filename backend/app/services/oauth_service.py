@@ -97,7 +97,7 @@ def exchange_github_code(
     client_secret: str,
     code: str,
     redirect_uri: str,
-) -> str:
+) -> dict[str, str]:
     response = requests.post(
         GITHUB_TOKEN_URL,
         headers={"Accept": "application/json"},
@@ -114,7 +114,28 @@ def exchange_github_code(
     access_token = payload.get("access_token")
     if not access_token:
         raise ValueError(payload.get("error_description", "GitHub token exchange failed"))
-    return access_token
+    return {
+        "access_token": access_token,
+        "scope": (payload.get("scope") or "").strip(),
+        "token_type": (payload.get("token_type") or "bearer").strip(),
+    }
+
+
+def fetch_github_token_scopes(access_token: str) -> str:
+    """Return comma-separated OAuth scopes granted to this token."""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    response = requests.head(GITHUB_USER_URL, headers=headers, timeout=20)
+    response.raise_for_status()
+    return (response.headers.get("X-OAuth-Scopes") or "").strip()
+
+
+def github_token_has_repo_scope(scopes: str) -> bool:
+    normalized = {part.strip().lower() for part in scopes.split(",") if part.strip()}
+    return "repo" in normalized
 
 
 def exchange_google_code(

@@ -301,12 +301,14 @@ def github_callback(
         redirect_uri = f"{settings['api_public_url']}/auth/github/callback"
         provider = state_payload.get("provider", "github")
 
-        access_token = exchange_github_code(
+        access_token_payload = exchange_github_code(
             client_id=settings["github_client_id"],
             client_secret=settings["github_client_secret"],
             code=code,
             redirect_uri=redirect_uri,
         )
+        access_token = access_token_payload["access_token"]
+        granted_scopes = access_token_payload.get("scope")
 
         if provider == "github_connector":
             user_id = state_payload.get("user_id")
@@ -315,7 +317,15 @@ def github_callback(
             user = db.query(User).filter(User.id == int(user_id)).first()
             if not user:
                 return _redirect_to_frontend_error("User not found for GitHub connector.")
-            connect_github_account_from_token(db, user=user, access_token=access_token)
+            try:
+                connect_github_account_from_token(
+                    db,
+                    user=user,
+                    access_token=access_token,
+                    scopes=granted_scopes,
+                )
+            except ValueError as exc:
+                return _redirect_to_frontend_error(str(exc), next_path=next_path)
             frontend = get_settings().FRONTEND_URL.rstrip("/")
             return RedirectResponse(
                 f"{frontend}{next_path}?github=connected",
@@ -329,6 +339,7 @@ def github_callback(
             user_id=user.id,
             access_token=access_token,
             profile=profile,
+            scopes=granted_scopes,
         )
         token, refresh_token = _issue_session_tokens(db=db, user=user, request=request)
 

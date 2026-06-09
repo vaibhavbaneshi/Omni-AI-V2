@@ -20,6 +20,7 @@ from app.services.github_connector_service import (
     connect_github_account_from_token,
     disconnect_github,
     get_connection,
+    github_connection_status,
     list_repositories,
     sync_repository,
 )
@@ -39,12 +40,9 @@ def github_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    connection = get_connection(db, user_id=current_user.id)
-    return {
-        "connected": connection is not None,
-        "github_login": connection.github_login if connection else None,
-        "signed_in_with_github": current_user.oauth_provider == "github",
-    }
+    status = github_connection_status(db, user_id=current_user.id)
+    status["signed_in_with_github"] = current_user.oauth_provider == "github"
+    return status
 
 
 @router.delete("/disconnect")
@@ -60,12 +58,16 @@ def github_disconnect(
 def github_authorize_url(
     next: str = Query("/chat"),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
+    connection = get_connection(db, user_id=current_user.id)
     return {
         "authorize_url": build_connector_authorize_url(
             user_id=current_user.id,
             next_path=next,
-        )
+            login=connection.github_login if connection else None,
+        ),
+        "revoke_url": github_connection_status(db, user_id=current_user.id)["revoke_url"],
     }
 
 
@@ -113,13 +115,18 @@ def github_connector_callback(
 
         settings = get_oauth_settings()
         legacy_redirect_uri = f"{settings['api_public_url']}/connectors/github/callback"
-        access_token = exchange_github_code(
+        access_token_payload = exchange_github_code(
             client_id=settings["github_client_id"],
             client_secret=settings["github_client_secret"],
             code=code,
             redirect_uri=legacy_redirect_uri,
         )
-        connect_github_account_from_token(db, user=user, access_token=access_token)
+        connect_github_account_from_token(
+            db,
+            user=user,
+            access_token=access_token_payload["access_token"],
+            scopes=access_token_payload.get("scope"),
+        )
         next_path = state_payload.get("next") or "/chat"
         if not next_path.startswith("/"):
             next_path = "/chat"

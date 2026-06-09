@@ -16,7 +16,7 @@ type SyncResult = Awaited<ReturnType<typeof syncGitHubRepo>>;
 function describeSyncResult(repoFullName: string, result: SyncResult): { kind: "success" | "error"; message: string } {
   const count = Number(result.files_indexed ?? 0);
   const candidates = Number(result.candidates_seen ?? 0);
-  const tarballMembers = Number(result.tarball_members ?? 0);
+  const tarballMembers = result.tarball_members;
   const skippedExtension = Number(result.skipped_extension ?? 0);
 
   if (count > 0) {
@@ -28,13 +28,13 @@ function describeSyncResult(repoFullName: string, result: SyncResult): { kind: "
   if (candidates > 0) {
     return {
       kind: "error",
-      message: `Found ${candidates} source file${candidates === 1 ? "" : "s"} in ${repoFullName} but none were indexed. Reconnect GitHub with repo access, then sync again.`,
+      message: `Found ${candidates} source file${candidates === 1 ? "" : "s"} in ${repoFullName} but none were indexed. Check backend logs or reconnect GitHub with repo access.`,
     };
   }
-  if (tarballMembers === 0) {
+  if (typeof tarballMembers === "number" && tarballMembers === 0) {
     return {
       kind: "error",
-      message: `GitHub returned an empty archive for ${repoFullName}. Disconnect GitHub below, reconnect, and grant repo access when prompted.`,
+      message: `GitHub returned an empty archive for ${repoFullName}. Revoke Omni-AI in GitHub settings, reconnect, and sync again.`,
     };
   }
   if (skippedExtension > 0) {
@@ -44,8 +44,8 @@ function describeSyncResult(repoFullName: string, result: SyncResult): { kind: "
     };
   }
   return {
-    kind: "success",
-    message: `Sync finished for ${repoFullName}, but no indexable source files were found. Reconnect GitHub if this repo is private.`,
+    kind: "error",
+    message: `Sync finished for ${repoFullName} with 0 indexed files. Revoke Omni-AI in GitHub settings, reconnect with repository access, then sync again.`,
   };
 }
 
@@ -63,6 +63,8 @@ export function GitHubConnectorPanel({
 }: GitHubConnectorPanelProps) {
   const [connected, setConnected] = useState(false);
   const [githubLogin, setGithubLogin] = useState<string | null>(null);
+  const [hasRepoScope, setHasRepoScope] = useState(true);
+  const [revokeUrl, setRevokeUrl] = useState<string | null>(null);
   const [statusSignedInWithGitHub, setStatusSignedInWithGitHub] = useState(false);
   const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [loading, setLoading] = useState(true);
@@ -77,6 +79,8 @@ export function GitHubConnectorPanel({
       const status = await getGitHubConnectorStatus(token);
       setConnected(status.connected);
       setGithubLogin(status.github_login ?? null);
+      setHasRepoScope(status.has_repo_scope !== false);
+      setRevokeUrl(status.revoke_url ?? null);
       setStatusSignedInWithGitHub(Boolean(status.signed_in_with_github));
       if (status.connected) {
         const data = await listGitHubRepos(token);
@@ -164,7 +168,10 @@ export function GitHubConnectorPanel({
     setError(null);
     setSuccess(null);
     try {
-      const { authorize_url } = await getGitHubConnectorAuthorizeUrl(token, "/chat");
+      const { authorize_url, revoke_url } = await getGitHubConnectorAuthorizeUrl(token, "/chat");
+      if (revoke_url) {
+        setRevokeUrl(revoke_url);
+      }
       window.location.href = authorize_url;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start GitHub authorization.");
@@ -261,9 +268,23 @@ export function GitHubConnectorPanel({
           <p className="text-[13px] font-medium">Not connected</p>
           <p className="mt-1 text-[12px] text-muted-foreground/60 mb-4">
             {statusSignedInWithGitHub
-              ? "Your GitHub sign-in will be linked automatically after you sign in again. You can also connect manually below."
-              : "Authorize GitHub to list and sync your repositories."}
+              ? "GitHub may skip the permission screen if Omni-AI is already authorized. Revoke the app in GitHub settings first if sync fails."
+              : "Authorize GitHub to list and sync your repositories (repo scope required)."}
           </p>
+          {revokeUrl && (
+            <p className="mb-4 text-[11px] text-muted-foreground/70">
+              Already authorized?{" "}
+              <a
+                href={revokeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground underline underline-offset-2"
+              >
+                Revoke Omni-AI in GitHub
+              </a>{" "}
+              first, then connect again.
+            </p>
+          )}
           <Button type="button" size="sm" onClick={() => void handleConnect()}>
             Connect GitHub
           </Button>
@@ -275,6 +296,15 @@ export function GitHubConnectorPanel({
             {" · "}
             Stays linked to your account after logout. Use Disconnect to remove GitHub access.
           </p>
+          {!hasRepoScope && revokeUrl && (
+            <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[12px] text-amber-100">
+              Repository access is missing.{" "}
+              <a href={revokeUrl} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+                Revoke Omni-AI in GitHub
+              </a>
+              , reconnect, and approve repository access.
+            </p>
+          )}
           <div className="flex justify-end">
             <Button
               type="button"

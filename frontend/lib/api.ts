@@ -1496,6 +1496,9 @@ export async function getGitHubConnectorStatus(token?: string | null) {
     connected: boolean;
     github_login?: string | null;
     signed_in_with_github?: boolean;
+    scopes?: string | null;
+    has_repo_scope?: boolean;
+    revoke_url?: string;
   }>("/connectors/github/status", {}, token);
 }
 
@@ -1545,7 +1548,7 @@ export async function disconnectGitHub(token?: string | null) {
 
 export async function getGitHubConnectorAuthorizeUrl(token?: string | null, nextPath = "/chat") {
   const params = new URLSearchParams({ next: nextPath });
-  return apiRequest<{ authorize_url: string }>(
+  return apiRequest<{ authorize_url: string; revoke_url?: string }>(
     `/connectors/github/authorize-url?${params.toString()}`,
     {},
     token

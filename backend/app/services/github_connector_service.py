@@ -18,7 +18,13 @@ from app.core.oauth_config import get_oauth_settings
 from app.models.document import DocumentCollection, DocumentRecord
 from app.models.github_connector import GitHubConnection, GitHubRepositorySync
 from app.models.user import User
-from app.services.oauth_service import decode_oauth_state, encode_oauth_state, exchange_github_code
+from app.services.oauth_service import (
+    decode_oauth_state,
+    encode_oauth_state,
+    exchange_github_code,
+    fetch_github_token_scopes,
+    github_token_has_repo_scope,
+)
 from app.services.security_audit_service import audit_log
 
 logger = logging.getLogger(__name__)
@@ -135,18 +141,26 @@ def save_connection(
     return record
 
 
-def build_connector_authorize_url(*, user_id: int, next_path: str = "/chat") -> str:
+def github_revoke_url() -> str:
+    settings = get_oauth_settings()
+    client_id = settings["github_client_id"]
+    if not client_id:
+        return "https://github.com/settings/applications"
+    return f"https://github.com/settings/connections/applications/{client_id}"
+
+
+def build_connector_authorize_url(*, user_id: int, next_path: str = "/chat", login: str | None = None) -> str:
     settings = get_oauth_settings()
     state = encode_oauth_state("github_connector", next_path, user_id=user_id)
-    params = urlencode(
-        {
-            "client_id": settings["github_client_id"],
-            "redirect_uri": github_oauth_redirect_uri(),
-            "scope": GITHUB_OAUTH_SCOPES,
-            "state": state,
-        }
-    )
-    return f"https://github.com/login/oauth/authorize?{params}"
+    params: dict[str, str] = {
+        "client_id": settings["github_client_id"],
+        "redirect_uri": github_oauth_redirect_uri(),
+        "scope": GITHUB_OAUTH_SCOPES,
+        "state": state,
+    }
+    if login:
+        params["login"] = login
+    return f"https://github.com/login/oauth/authorize?{urlencode(params)}"
 
 
 def link_github_account_from_login(
@@ -155,15 +169,44 @@ def link_github_account_from_login(
     user_id: int,
     access_token: str,
     profile: dict[str, str],
+    scopes: str | None = None,
 ) -> GitHubConnection:
+    resolved_scopes = (scopes or "").strip() or fetch_github_token_scopes(access_token)
     return save_connection(
         db,
         user_id=user_id,
         github_user_id=profile["github_user_id"],
         github_login=profile["github_login"],
         access_token=access_token,
-        scopes=GITHUB_OAUTH_SCOPES,
+        scopes=resolved_scopes,
     )
+
+
+def github_connection_status(db: Session, *, user_id: int) -> dict[str, Any]:
+    connection = get_connection(db, user_id=user_id)
+    if connection is None:
+        return {
+            "connected": False,
+            "github_login": None,
+            "scopes": None,
+            "has_repo_scope": False,
+            "revoke_url": github_revoke_url(),
+        }
+    scopes = (connection.scopes or "").strip()
+    if scopes and not github_token_has_repo_scope(scopes):
+        try:
+            scopes = fetch_github_token_scopes(connection.access_token)
+            connection.scopes = scopes
+            db.commit()
+        except Exception:
+            logger.warning("Unable to refresh GitHub token scopes for user %s", user_id)
+    return {
+        "connected": True,
+        "github_login": connection.github_login,
+        "scopes": scopes or None,
+        "has_repo_scope": github_token_has_repo_scope(scopes),
+        "revoke_url": github_revoke_url(),
+    }
 
 
 def connect_github_account_from_token(
@@ -171,15 +214,22 @@ def connect_github_account_from_token(
     *,
     user: User,
     access_token: str,
+    scopes: str | None = None,
 ) -> GitHubConnection:
     profile = _github_get(access_token, "/user")
+    resolved_scopes = (scopes or "").strip() or fetch_github_token_scopes(access_token)
+    if not github_token_has_repo_scope(resolved_scopes):
+        raise ValueError(
+            "GitHub did not grant repository access (repo scope). "
+            f"Revoke Omni-AI at {github_revoke_url()}, then connect again and approve repository access."
+        )
     return save_connection(
         db,
         user_id=user.id,
         github_user_id=str(profile["id"]),
         github_login=profile["login"],
         access_token=access_token,
-        scopes=GITHUB_OAUTH_SCOPES,
+        scopes=resolved_scopes,
     )
 
 
@@ -192,13 +242,18 @@ def handle_connector_callback(
 ) -> GitHubConnection:
     decode_oauth_state(state)
     settings = get_oauth_settings()
-    access_token = exchange_github_code(
+    access_token_payload = exchange_github_code(
         client_id=settings["github_client_id"],
         client_secret=settings["github_client_secret"],
         code=code,
         redirect_uri=github_oauth_redirect_uri(),
     )
-    return connect_github_account_from_token(db, user=user, access_token=access_token)
+    return connect_github_account_from_token(
+        db,
+        user=user,
+        access_token=access_token_payload["access_token"],
+        scopes=access_token_payload.get("scope"),
+    )
 
 
 def disconnect_github(db: Session, *, user_id: int) -> bool:
@@ -422,11 +477,6 @@ def _index_repo_from_tarball(
     session_id: int | None,
 ) -> dict[str, int]:
     archive_bytes = _download_repo_tarball(connection.access_token, repo_full_name, branch)
-    if len(archive_bytes) < 64:
-        raise ValueError(
-            f"GitHub returned an empty archive for {repo_full_name}. "
-            "Reconnect GitHub and ensure the repo scope is granted."
-        )
     logger.info(
         "GitHub tarball downloaded for %s (%s bytes)",
         repo_full_name,
@@ -446,16 +496,22 @@ def _index_repo_from_tarball(
     with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as archive:
         members = archive.getmembers()
         stats["tarball_members"] = len(members)
+        file_members = [member for member in members if member.isfile()]
+        stats["tarball_files"] = len(file_members)
         root_prefix = _tarball_root_prefix(members)
         logger.info(
-            "GitHub tarball for %s: %d members, root_prefix=%r",
+            "GitHub tarball for %s: %d members (%d files), root_prefix=%r",
             repo_full_name,
             len(members),
+            len(file_members),
             root_prefix,
         )
-        for member in members:
-            if not member.isfile():
-                continue
+        if not file_members:
+            raise ValueError(
+                f"GitHub archive for {repo_full_name} contained no files. "
+                f"Revoke Omni-AI at {github_revoke_url()}, reconnect, and sync again."
+            )
+        for member in file_members:
             relative_path = _tarball_relative_path(member.name, root_prefix)
             if not relative_path:
                 continue
@@ -512,20 +568,42 @@ def _index_repo_from_tarball(
 
 def _download_repo_tarball(token: str, repo_full_name: str, branch: str) -> bytes:
     owner, repo = repo_full_name.split("/", 1)
-    url = f"{GITHUB_API}/repos/{owner}/{repo}/tarball/{quote(branch, safe='')}"
-    last_response: httpx.Response | None = None
-    for auth_scheme in (f"Bearer {token}", f"token {token}"):
-        headers = {
-            "Authorization": auth_scheme,
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
-        last_response = httpx.get(url, headers=headers, follow_redirects=True, timeout=180)
-        if last_response.status_code != 401:
-            break
-    assert last_response is not None
-    last_response.raise_for_status()
-    return last_response.content
+    api_url = f"{GITHUB_API}/repos/{owner}/{repo}/tarball/{quote(branch, safe='')}"
+    base_headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    def _fetch_archive(*, with_token: bool) -> httpx.Response:
+        headers = dict(base_headers)
+        if with_token:
+            headers["Authorization"] = f"Bearer {token}"
+        response = httpx.get(api_url, headers=headers, follow_redirects=False, timeout=180)
+        if response.status_code in {301, 302, 303, 307, 308}:
+            location = response.headers.get("location")
+            if not location:
+                raise ValueError("GitHub tarball redirect did not include a download URL.")
+            response = httpx.get(location, follow_redirects=True, timeout=180)
+        return response
+
+    response = _fetch_archive(with_token=True)
+    if response.status_code == 401:
+        response = _fetch_archive(with_token=False)
+    response.raise_for_status()
+
+    content = response.content
+    if not content.startswith(b"\x1f\x8b"):
+        preview = content[:160].decode("utf-8", errors="replace")
+        raise ValueError(
+            f"GitHub tarball download for {repo_full_name} did not return a gzip archive. "
+            f"Response preview: {preview}"
+        )
+    if len(content) < 64:
+        raise ValueError(
+            f"GitHub returned an empty archive for {repo_full_name}. "
+            "Revoke Omni-AI in GitHub settings, reconnect, and approve repository access."
+        )
+    return content
 
 
 def _tarball_root_prefix(members: list[tarfile.TarInfo]) -> str:

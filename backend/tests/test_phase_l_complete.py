@@ -322,12 +322,16 @@ def test_link_github_account_from_login(db_session):
         "username": user.email,
         "name": "Dev User",
     }
-    connection = link_github_account_from_login(
-        db_session,
-        user_id=user.id,
-        access_token="gh-login-token",
-        profile=profile,
-    )
+    with patch(
+        "app.services.github_connector_service.fetch_github_token_scopes",
+        return_value="read:user,repo,user:email",
+    ):
+        connection = link_github_account_from_login(
+            db_session,
+            user_id=user.id,
+            access_token="gh-login-token",
+            profile=profile,
+        )
     assert connection.github_login == "devuser"
     assert get_connection(db_session, user_id=user.id) is not None
 
@@ -348,7 +352,10 @@ def test_github_build_authorize_url():
 def test_github_handle_connector_callback(db_session):
     user = UserFactory()
     with patch("app.services.github_connector_service.decode_oauth_state"):
-        with patch("app.services.github_connector_service.exchange_github_code", return_value="tok"):
+        with patch(
+            "app.services.github_connector_service.exchange_github_code",
+            return_value={"access_token": "tok", "scope": "read:user,repo,user:email"},
+        ):
             with patch(
                 "app.services.github_connector_service._github_get",
                 return_value={"id": 99, "login": "devuser"},
