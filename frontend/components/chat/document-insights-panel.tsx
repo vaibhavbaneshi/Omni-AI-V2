@@ -1,7 +1,13 @@
 "use client";
 
-import { Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { DocumentInsightRecord, DocumentRecord } from "@/lib/api";
 
 type DocumentInsightsPanelProps = {
@@ -88,22 +94,29 @@ export function DocumentInsightsPanel({
       </div>
 
       {embedded && documents.length > 1 && onSelectDocument && (
-        <div className="flex flex-wrap gap-1.5">
-          {documents.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
-                activeDocumentId === item.id
-                  ? "border-primary/30 bg-primary/10 text-primary"
-                  : "border-white/10 text-muted-foreground hover:text-foreground"
-              }`}
-              onClick={() => onSelectDocument(item.id)}
-            >
-              {item.filename}
-            </button>
-          ))}
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.02] px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-white/15 hover:text-foreground"
+          >
+            More…
+            <span className="text-muted-foreground/60">({documents.length} documents)</span>
+            <ChevronDown className="size-3 opacity-60" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-60 w-[min(18rem,calc(100vw-2rem))] overflow-y-auto">
+            {documents.map((item) => (
+              <DropdownMenuItem
+                key={item.id}
+                className="gap-2 text-[12px]"
+                onClick={() => onSelectDocument(item.id)}
+              >
+                <Check
+                  className={`size-3 shrink-0 ${activeDocumentId === item.id ? "opacity-100" : "opacity-0"}`}
+                />
+                <span className="truncate">{item.filename}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       {error && (

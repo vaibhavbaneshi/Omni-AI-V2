@@ -225,6 +225,10 @@ export function GitHubConnectorPanel({
         const feedback = describeSyncResult(repoFullName, result);
         if (feedback.kind === "error") {
           setError(feedback.message);
+        } else if ((result.files_indexed ?? 0) > 0) {
+          setSuccess(
+            `${feedback.message} Indexing runs in the background — open Files → GitHub to browse (40 at a time).`
+          );
         } else {
           setSuccess(feedback.message);
         }

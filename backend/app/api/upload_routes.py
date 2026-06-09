@@ -11,6 +11,7 @@ from fastapi import (
     Depends,
     Query,
 )
+from sqlalchemy import func
 from pydantic import ValidationError
 
 from app.services.document_loaders import DocumentLoadError
@@ -388,11 +389,13 @@ def list_documents(
     workspace_id: str = "default",
     collection_id: int | None = None,
     session_id: int | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if session_id is None and collection_id is None:
-        return {"documents": []}
+        return {"documents": [], "total": 0, "limit": limit, "offset": offset, "has_more": False}
 
     query = (
         db.query(DocumentRecord)
@@ -407,24 +410,69 @@ def list_documents(
     if collection_id is not None:
         query = query.filter(DocumentRecord.collection_id == collection_id)
 
-    records = query.order_by(DocumentRecord.created_at.desc()).all()
+    total = query.count()
+    records = (
+        query.order_by(DocumentRecord.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     return {
         "documents": [
             {
                 **document_status_payload(document),
-                "size": document.file_size
-                or (
-                    os.path.getsize(document.storage_path)
-                    if document.storage_path and os.path.exists(document.storage_path)
-                    else 0
-                ),
+                "size": document.file_size or 0,
                 "updated_at": document.created_at.timestamp() if document.created_at else 0,
                 "collection_id": document.collection_id,
                 "session_id": document.session_id,
             }
             for document in records
-        ]
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(records) < total,
+    }
+
+
+@router.get("/documents/indexing-summary")
+def documents_indexing_summary(
+    workspace_id: str = "default",
+    collection_id: int | None = None,
+    session_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if session_id is None and collection_id is None:
+        raise HTTPException(status_code=400, detail="Provide session_id or collection_id.")
+
+    query = db.query(DocumentRecord).filter(
+        DocumentRecord.user_id == current_user.id,
+        DocumentRecord.workspace_id == workspace_id,
+    )
+    if session_id is not None:
+        query = query.filter(DocumentRecord.session_id == session_id)
+    if collection_id is not None:
+        query = query.filter(DocumentRecord.collection_id == collection_id)
+
+    rows = (
+        query.with_entities(DocumentRecord.indexing_stage, func.count(DocumentRecord.id))
+        .group_by(DocumentRecord.indexing_stage)
+        .all()
+    )
+    counts = {stage or "queued": count for stage, count in rows}
+    total = sum(counts.values())
+    ready = counts.get("ready", 0)
+    failed = counts.get("failed", 0)
+    indexing = total - ready - failed
+
+    return {
+        "total": total,
+        "ready": ready,
+        "indexing": indexing,
+        "failed": failed,
+        "by_stage": counts,
     }
 
 

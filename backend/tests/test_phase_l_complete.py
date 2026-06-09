@@ -408,11 +408,12 @@ def test_github_list_repositories(db_session):
     assert repos[0]["last_sync_at"] is not None
 
 
-@patch("app.services.ingestion_queue.dispatch_document_ingestion")
+@patch("app.services.ingestion_queue.dispatch_documents_ingestion")
 @patch("app.services.ingestion_queue.ingest_queue_enabled", return_value=True)
 @patch("app.core.app_settings.get_settings")
 def test_github_sync_repository_indexes_files(mock_get_settings, mock_queue_enabled, mock_dispatch, db_session):
     mock_get_settings.return_value = MagicMock(INGEST_IN_BACKGROUND=True)
+    mock_dispatch.return_value = {"dispatch": "rq", "queued": 2, "worker_count": 1}
     user = UserFactory()
     save_connection(
         db_session,
@@ -451,7 +452,9 @@ def test_github_sync_repository_indexes_files(mock_get_settings, mock_queue_enab
     assert result["status"] == "complete"
     assert result["files_indexed"] == 2
     assert result["candidates_seen"] == 2
-    assert mock_dispatch.call_count == 2
+    assert mock_dispatch.call_count == 1
+    queued_ids = mock_dispatch.call_args[0][1]
+    assert len(queued_ids) == 2
 
 
 def test_github_disconnect_clears_connection(db_session):
@@ -491,7 +494,7 @@ def test_github_sync_skips_node_modules(db_session):
             return {"sha": "commit123"}
         raise AssertionError(path)
 
-    with patch("app.services.ingestion_queue.dispatch_document_ingestion") as mock_dispatch:
+    with patch("app.services.ingestion_queue.dispatch_documents_ingestion") as mock_dispatch:
         with patch("app.services.ingestion_queue.ingest_queue_enabled", return_value=True):
             with patch(
                 "app.core.app_settings.get_settings",

@@ -246,6 +246,9 @@ export default function ChatPage() {
     setStatus: setUploadStatus,
     setMessage: setUploadMessage,
     refresh: refreshDocuments,
+    loadMoreCollectionDocuments,
+    collectionPaging,
+    activeCollection,
     upload: uploadWorkspaceDocument,
     remove: removeWorkspaceDocument,
   } = useDocuments(session?.token, activeChat?.id ?? null);
@@ -1615,9 +1618,12 @@ export default function ChatPage() {
                   token={session?.token}
                   collections={collections}
                   activeCollectionId={activeCollectionId}
+                  activeCollection={activeCollection}
                   documents={documents}
                   readyDocuments={readyDocuments}
                   indexingDocuments={indexingDocuments}
+                  collectionPaging={collectionPaging}
+                  onLoadMoreDocuments={loadMoreCollectionDocuments}
                   activeDocumentId={insightDocumentId}
                   insightDocument={insightDocument}
                   documentInsights={documentInsights}

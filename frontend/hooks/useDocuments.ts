@@ -3,6 +3,7 @@ import {
   createCollection,
   deleteDocumentById,
   getDocumentStatus,
+  getDocumentsIndexingSummary,
   indexingStageLabel,
   isDocumentFailed,
   isDocumentIndexing,
@@ -23,6 +24,8 @@ import { sanitizeApiError } from "@/lib/user-facing-errors";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const STALE_INDEXING_MS = 15 * 60 * 1000;
+const SESSION_DOC_LIMIT = 100;
+const COLLECTION_PAGE_SIZE = 40;
 
 function belongsToSession(document: DocumentRecord, sessionId: number | null): boolean {
   if (!sessionId) return false;
@@ -64,6 +67,13 @@ function applyStatusUpdate(document: DocumentRecord, update: Awaited<ReturnType<
 
 export function useDocuments(token?: string | null, sessionId?: string | null) {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [collectionDocuments, setCollectionDocuments] = useState<DocumentRecord[]>([]);
+  const [collectionPaging, setCollectionPaging] = useState({
+    total: 0,
+    hasMore: false,
+    offset: 0,
+    loading: false,
+  });
   const [collections, setCollections] = useState<DocumentCollection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState<number | null>(null);
   const [status, setStatus] = useState<"idle" | "uploading" | "indexing" | "success" | "error">(
@@ -78,41 +88,81 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
   const currentSessionIdRef = useRef<number | null>(numericSessionId);
   const pollTimerRef = useRef<number | null>(null);
   const indexingStartedAtRef = useRef<number | null>(null);
+  const activeCollectionIdRef = useRef<number | null>(activeCollectionId);
+  const collectionPagingRef = useRef(collectionPaging);
 
   useEffect(() => {
     currentSessionIdRef.current = numericSessionId;
   }, [numericSessionId]);
 
+  useEffect(() => {
+    activeCollectionIdRef.current = activeCollectionId;
+  }, [activeCollectionId]);
+
+  useEffect(() => {
+    collectionPagingRef.current = collectionPaging;
+  }, [collectionPaging]);
+
+  const loadCollectionDocuments = useCallback(
+    async (collectionId: number, options?: { reset?: boolean; append?: boolean }) => {
+      if (!token) {
+        setCollectionDocuments([]);
+        setCollectionPaging({ total: 0, hasMore: false, offset: 0, loading: false });
+        return [];
+      }
+
+      const offset = options?.reset ? 0 : options?.append ? collectionPagingRef.current.offset : 0;
+      setCollectionPaging((current) => ({ ...current, loading: true }));
+      try {
+        const result = await listDocuments(token, {
+          collectionId,
+          limit: COLLECTION_PAGE_SIZE,
+          offset,
+        });
+        const nextDocuments =
+          options?.reset || !options?.append
+            ? result.documents
+            : [...collectionDocuments, ...result.documents];
+
+        if (activeCollectionIdRef.current === collectionId) {
+          setCollectionDocuments(nextDocuments);
+          setCollectionPaging({
+            total: result.total ?? nextDocuments.length,
+            hasMore: Boolean(result.has_more),
+            offset: offset + result.documents.length,
+            loading: false,
+          });
+        }
+        return nextDocuments;
+      } catch {
+        if (activeCollectionIdRef.current === collectionId) {
+          setCollectionPaging((current) => ({ ...current, loading: false }));
+        }
+        return collectionDocuments;
+      }
+    },
+    [collectionDocuments, token]
+  );
+
   const refresh = useCallback(async (sessionIdOverride?: number | null) => {
     const scopedSessionId = sessionIdOverride ?? numericSessionId;
 
-    const [collectionResult] = await Promise.all([
-      token ? listCollections(token) : Promise.resolve({ collections: [] as DocumentCollection[] }),
-    ]);
+    const collectionResult = token
+      ? await listCollections(token)
+      : { collections: [] as DocumentCollection[] };
 
     let scopedDocuments: DocumentRecord[] = [];
     if (token && scopedSessionId) {
-      const documentResult = await listDocuments(token, { sessionId: scopedSessionId });
+      const documentResult = await listDocuments(token, {
+        sessionId: scopedSessionId,
+        limit: SESSION_DOC_LIMIT,
+      });
       scopedDocuments = documentResult.documents.filter((document) =>
         belongsToSession(document, scopedSessionId)
       );
     }
 
-    const githubCollection = collectionResult.collections.find(
-      (collection) => collection.name === "GitHub"
-    );
-    if (token && githubCollection) {
-      const githubDocs = await listDocuments(token, { collectionId: githubCollection.id });
-      const seen = new Set(scopedDocuments.map((document) => document.id));
-      for (const document of githubDocs.documents) {
-        if (!seen.has(document.id)) {
-          scopedDocuments.push(document);
-          seen.add(document.id);
-        }
-      }
-    }
-
-    if (scopedSessionId === numericSessionId || githubCollection) {
+    if (scopedSessionId === numericSessionId || !scopedSessionId) {
       setDocuments(scopedDocuments);
       setCollections(collectionResult.collections);
 
@@ -122,11 +172,25 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
       }
     }
 
+    const collectionId = activeCollectionIdRef.current;
+    if (token && collectionId) {
+      await loadCollectionDocuments(collectionId, { reset: true });
+    } else {
+      setCollectionDocuments([]);
+      setCollectionPaging({ total: 0, hasMore: false, offset: 0, loading: false });
+    }
+
     return scopedDocuments;
-  }, [activeCollectionId, numericSessionId, token]);
+  }, [activeCollectionId, loadCollectionDocuments, numericSessionId, token]);
+
+  useEffect(() => {
+    if (!token || !activeCollectionId) return;
+    void loadCollectionDocuments(activeCollectionId, { reset: true });
+  }, [activeCollectionId, loadCollectionDocuments, token]);
 
   useEffect(() => {
     setDocuments([]);
+    setCollectionDocuments([]);
     setStatus("idle");
     setMessage(null);
     indexingStartedAtRef.current = null;
@@ -144,6 +208,18 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
     return () => window.clearTimeout(id);
   }, [numericSessionId, token, refresh]);
+
+  const loadMoreCollectionDocuments = useCallback(async () => {
+    if (!activeCollectionId || !collectionPaging.hasMore || collectionPaging.loading) {
+      return;
+    }
+    await loadCollectionDocuments(activeCollectionId, { append: true });
+  }, [activeCollectionId, collectionPaging.hasMore, collectionPaging.loading, loadCollectionDocuments]);
+
+  const refreshCollectionSummary = useCallback(async () => {
+    if (!token || !activeCollectionId) return null;
+    return getDocumentsIndexingSummary(token, { collectionId: activeCollectionId });
+  }, [activeCollectionId, token]);
 
   const pollIndexingDocuments = useCallback(async () => {
     if (!token || !numericSessionId) return;
@@ -365,6 +441,7 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
 
   const remove = async (documentId: number) => {
     setDocuments((current) => current.filter((document) => document.id !== documentId));
+    setCollectionDocuments((current) => current.filter((document) => document.id !== documentId));
     await deleteDocumentById(documentId, token);
     await refresh();
   };
@@ -376,21 +453,32 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     return collection;
   };
 
-  const readyDocuments = documents.filter(isDocumentReady);
-  const indexingDocuments = documents.filter(isDocumentIndexing);
-  const failedDocuments = documents.filter(isDocumentFailed);
+  const activeCollection = collections.find((item) => item.id === activeCollectionId) ?? null;
+  const viewingCollection =
+    activeCollectionId !== null &&
+    activeCollection !== null &&
+    activeCollection.name !== "Default";
+  const visibleDocuments = viewingCollection ? collectionDocuments : documents;
+
+  const readyDocuments = visibleDocuments.filter(isDocumentReady);
+  const indexingDocuments = visibleDocuments.filter(isDocumentIndexing);
+  const failedDocuments = visibleDocuments.filter(isDocumentFailed);
   const isUploadActiveForSession =
     uploadTargetSessionId !== null &&
     uploadTargetSessionId === numericSessionId &&
     (status === "uploading" || status === "indexing");
 
   return {
-    documents,
+    documents: visibleDocuments,
+    sessionDocuments: documents,
+    collectionDocuments,
+    collectionPaging,
     readyDocuments,
     indexingDocuments,
     failedDocuments,
     collections,
     activeCollectionId,
+    activeCollection,
     setActiveCollectionId,
     status,
     message,
@@ -398,6 +486,8 @@ export function useDocuments(token?: string | null, sessionId?: string | null) {
     setStatus,
     setMessage,
     refresh,
+    refreshCollectionSummary,
+    loadMoreCollectionDocuments,
     upload,
     remove,
     addCollection,

@@ -331,6 +331,38 @@ export function indexingStageLabel(document: DocumentRecord): string {
 
 export async function listDocuments(
   token?: string | null,
+  options?: {
+    sessionId?: number | null;
+    collectionId?: number | null;
+    limit?: number;
+    offset?: number;
+  }
+) {
+  const params = new URLSearchParams();
+  if (options?.sessionId) {
+    params.set("session_id", String(options.sessionId));
+  }
+  if (options?.collectionId) {
+    params.set("collection_id", String(options.collectionId));
+  }
+  if (typeof options?.limit === "number") {
+    params.set("limit", String(options.limit));
+  }
+  if (typeof options?.offset === "number") {
+    params.set("offset", String(options.offset));
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return apiRequest<{
+    documents: DocumentRecord[];
+    total?: number;
+    limit?: number;
+    offset?: number;
+    has_more?: boolean;
+  }>(`/documents${suffix}`, {}, token);
+}
+
+export async function getDocumentsIndexingSummary(
+  token?: string | null,
   options?: { sessionId?: number | null; collectionId?: number | null }
 ) {
   const params = new URLSearchParams();
@@ -341,7 +373,13 @@ export async function listDocuments(
     params.set("collection_id", String(options.collectionId));
   }
   const suffix = params.size ? `?${params.toString()}` : "";
-  return apiRequest<{ documents: DocumentRecord[] }>(`/documents${suffix}`, {}, token);
+  return apiRequest<{
+    total: number;
+    ready: number;
+    indexing: number;
+    failed: number;
+    by_stage: Record<string, number>;
+  }>(`/documents/indexing-summary${suffix}`, {}, token);
 }
 
 export async function getDocumentStatus(documentId: number, token?: string | null) {

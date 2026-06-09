@@ -47,6 +47,13 @@ type WorkspaceContextSheetProps = {
   deletingDocumentId?: number | null;
   onAttachClick?: () => void;
   uploadBusy?: boolean;
+  activeCollection?: DocumentCollection | null;
+  collectionPaging?: {
+    total: number;
+    hasMore: boolean;
+    loading: boolean;
+  };
+  onLoadMoreDocuments?: () => Promise<unknown>;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   defaultTab?: WorkspaceContextTab;
@@ -75,6 +82,9 @@ export function WorkspaceContextSheet({
   deletingDocumentId,
   onAttachClick,
   uploadBusy = false,
+  activeCollection = null,
+  collectionPaging,
+  onLoadMoreDocuments,
   open: controlledOpen,
   onOpenChange,
   defaultTab = "files",
@@ -92,7 +102,8 @@ export function WorkspaceContextSheet({
     }
   }, [open, defaultTab]);
 
-  const docCount = documents.length;
+  const docCount = collectionPaging?.total ?? documents.length;
+  const displayedCount = documents.length;
   const hasInsights =
     documentInsights?.status === "ready" && Boolean(documentInsights.payload);
 
@@ -181,11 +192,18 @@ export function WorkspaceContextSheet({
                   <UploadCloud className="mx-auto mb-2 size-5 text-muted-foreground/50" />
                   <p className="text-[13px] font-medium text-foreground/85">No files yet</p>
                   <p className="mt-1 text-[12px] text-muted-foreground/60">
-                    Upload documents to scope answers to this conversation.
+                    {activeCollection?.name === "GitHub"
+                      ? "Sync a repository from Connectors, then browse indexed files here."
+                      : "Upload documents to scope answers to this conversation."}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2">
+                  {activeCollection && activeCollection.name !== "Default" && (
+                    <p className="text-[11px] text-muted-foreground/70">
+                      Showing {displayedCount} of {docCount} in {activeCollection.name}
+                    </p>
+                  )}
                   {indexingDocuments.map((document) => (
                     <FileRow
                       key={`indexing-${document.id}`}
@@ -210,6 +228,25 @@ export function WorkspaceContextSheet({
                       }
                     />
                   ))}
+                  {collectionPaging?.hasMore && onLoadMoreDocuments && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="mt-2 h-8 w-full text-[11px]"
+                      disabled={collectionPaging.loading}
+                      onClick={() => void onLoadMoreDocuments()}
+                    >
+                      {collectionPaging.loading ? (
+                        <>
+                          <Loader2 className="mr-2 size-3 animate-spin" />
+                          Loading...
+                        </>
+                      ) : (
+                        `Load more (${docCount - displayedCount} remaining)`
+                      )}
+                    </Button>
+                  )}
                 </div>
               )}
             </TabsContent>

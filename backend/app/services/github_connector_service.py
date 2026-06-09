@@ -610,31 +610,9 @@ def _dispatch_github_ingestion(db: Session, document_ids: list[int]) -> None:
     if not document_ids:
         return
 
-    from app.core.app_settings import get_settings
-    from app.services.ingestion_queue import dispatch_document_ingestion, ingest_queue_enabled
+    from app.services.ingestion_queue import dispatch_documents_ingestion
 
-    settings = get_settings()
-    if settings.INGEST_IN_BACKGROUND and ingest_queue_enabled():
-        for document_id in document_ids:
-            dispatch_document_ingestion(db, document_id)
-        return
-
-    if not settings.INGEST_IN_BACKGROUND:
-        from app.services.ingestion_service import run_ingest_document_record
-
-        for document_id in document_ids[:5]:
-            run_ingest_document_record(db, document_id)
-        if len(document_ids) > 5:
-            logger.info(
-                "Queued %s GitHub documents for later ingestion (dev batch limit reached)",
-                len(document_ids) - 5,
-            )
-        return
-
-    logger.warning(
-        "Ingest queue unavailable; %s GitHub documents saved as queued without worker dispatch",
-        len(document_ids),
-    )
+    dispatch_documents_ingestion(db, document_ids)
 
 
 def _download_repo_tarball(token: str, repo_full_name: str, branch: str) -> bytes:

@@ -187,24 +187,34 @@ def try_recover_stuck_queued_document(document_id: int) -> bool:
 
 def dispatch_document_ingestion(db: Session, document_id: int) -> dict:
     """Enqueue to RQ when a worker is connected; otherwise ingest in-process."""
+    return dispatch_documents_ingestion(db, [document_id])
+
+
+def dispatch_documents_ingestion(db: Session, document_ids: list[int]) -> dict:
+    """Enqueue many documents with minimal DB round-trips."""
+    unique_ids = [doc_id for doc_id in dict.fromkeys(document_ids) if doc_id]
+    if not unique_ids:
+        return {"dispatch": "none", "queued": 0, "worker_count": 0}
+
     worker_count = get_active_worker_count()
     if worker_count > 0:
-        job_id = enqueue_document_ingestion(db, document_id)
+        queued = enqueue_documents_ingestion(db, unique_ids)
         return {
             "dispatch": "rq",
-            "job_id": job_id,
+            "queued": queued,
             "worker_count": worker_count,
         }
 
     logger.warning(
-        "[INGEST_FALLBACK_INLINE] document_id=%s worker_count=%s — skipping RQ, using API process",
-        document_id,
+        "[INGEST_FALLBACK_INLINE] document_count=%s worker_count=%s — skipping RQ, using API process",
+        len(unique_ids),
         worker_count,
     )
-    run_ingest_inline_thread(document_id, db=db)
+    for document_id in unique_ids[:5]:
+        run_ingest_inline_thread(document_id, db=db)
     return {
         "dispatch": "inline_thread",
-        "job_id": None,
+        "queued": min(len(unique_ids), 5),
         "worker_count": worker_count,
         "warning": (
             "No RQ worker connected — indexing runs in the API process instead of the queue. "
@@ -343,6 +353,56 @@ def enqueue_document_ingestion(db: Session, document_id: int) -> str:
         worker_count,
     )
     return job.id
+
+
+def enqueue_documents_ingestion(db: Session, document_ids: list[int]) -> int:
+    """Enqueue many ingestion jobs and persist queue metadata in one DB commit."""
+    if not document_ids:
+        return 0
+
+    settings = get_settings()
+    queue = get_ingest_queue()
+    retry = _retry_policy()
+    documents = {
+        row.id: row
+        for row in db.query(DocumentRecord)
+        .filter(DocumentRecord.id.in_(document_ids))
+        .all()
+    }
+    queued = 0
+    base_ts = int(time.time())
+
+    for index, document_id in enumerate(document_ids):
+        job = queue.enqueue(
+            INGEST_JOB_PATH,
+            document_id,
+            job_id=f"ingest-doc-{document_id}-{base_ts}-{index}",
+            retry=retry,
+            job_timeout=JOB_TIMEOUT_SECONDS,
+            result_ttl=settings.INGEST_JOB_RESULT_TTL_SECONDS,
+            failure_ttl=settings.INGEST_JOB_FAILURE_TTL_SECONDS,
+            on_failure=on_ingestion_job_failure,
+            description=f"Index document {document_id}",
+        )
+        update_indexing_progress(
+            db,
+            document_id,
+            stage="queued",
+            mark_started=True,
+        )
+        document = documents.get(document_id)
+        if document:
+            document.indexing_job_id = job.id
+        queued += 1
+
+    db.commit()
+    logger.info(
+        "[INGEST_RQ_ENQUEUED_BATCH] queued=%s queue=%s max_retries=%s",
+        queued,
+        INGEST_QUEUE_NAME,
+        settings.INGEST_JOB_MAX_RETRIES,
+    )
+    return queued
 
 
 def get_ingestion_queue_metrics() -> dict:
