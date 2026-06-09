@@ -132,12 +132,6 @@ export function SocialAuthButtons({
           {inlineError}
         </p>
       )}
-
-      {ready && !providers.github && !providers.google && (
-        <p className="text-[11px] text-muted-foreground/70 text-center mt-2">
-          Social sign-in requires OAuth keys in the backend `.env`. Restart the API after adding them.
-        </p>
-      )}
     </div>
   );
 }
