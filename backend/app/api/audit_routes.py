@@ -20,7 +20,7 @@ from app.services.security_audit_service import audit_log
 from app.services.workspace_connector_service import get_connector, list_connectors, sync_connector
 
 audit_router = APIRouter(prefix="/audit", tags=["audit"])
-connector_router = APIRouter(prefix="/connectors", tags=["connectors"])
+connector_router = APIRouter(prefix="/admin/connectors", tags=["connectors", "admin"])
 
 
 def require_admin():

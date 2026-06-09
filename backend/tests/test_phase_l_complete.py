@@ -596,6 +596,36 @@ def test_github_connector_routes(_mock, auth_client, db_session):
     assert len(response.json()["repositories"]) == 1
 
 
+def test_github_sync_route_not_shadowed_by_admin_stub(auth_client, db_session):
+    user = auth_client.auth_user
+    save_connection(
+        db_session,
+        user_id=user.id,
+        github_user_id="1",
+        github_login="dev",
+        access_token="token",
+        scopes="read:user,repo,user:email",
+    )
+
+    with patch("app.api.github_connector_routes.sync_repository") as mock_sync:
+        mock_sync.return_value = {
+            "status": "complete",
+            "files_indexed": 3,
+            "candidates_seen": 3,
+            "tarball_files": 3,
+        }
+        response = auth_client.post(
+            "/connectors/github/sync",
+            headers=auth_client.auth_headers,
+            json={"repo_full_name": "acme/docs"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "complete"
+    assert response.json()["files_indexed"] == 3
+    mock_sync.assert_called_once()
+
+
 @patch("app.core.admin_access.user_has_admin_access", return_value=True)
 def test_analytics_cache_metrics_endpoint(_mock, auth_client):
     response = auth_client.get("/analytics/cache", headers=auth_client.auth_headers)

@@ -14,6 +14,15 @@ import {
 type SyncResult = Awaited<ReturnType<typeof syncGitHubRepo>>;
 
 function describeSyncResult(repoFullName: string, result: SyncResult): { kind: "success" | "error"; message: string } {
+  if (result.status === "queued" && !result.files_indexed && !result.candidates_seen) {
+    return {
+      kind: "error",
+      message:
+        String(result.message ?? "") ||
+        "GitHub sync hit a legacy admin stub endpoint. Redeploy the latest backend and try again.",
+    };
+  }
+
   const count = Number(result.files_indexed ?? 0);
   const candidates = Number(result.candidates_seen ?? 0);
   const tarballMembers = result.tarball_members;
@@ -198,6 +207,13 @@ export function GitHubConnectorPanel({
     setSuccess(null);
     try {
       const result = await syncGitHubRepo(repoFullName, token);
+      if (result.status === "queued") {
+        setError(
+          String(result.message ?? "GitHub sync was queued on a legacy endpoint and did not run. Redeploy the backend.")
+        );
+        await load();
+        return;
+      }
       if (result.status === "running") {
         setSuccess(result.message ?? "Sync already in progress for this repository.");
         pollUntilSettled(repoFullName);
