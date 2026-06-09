@@ -11,11 +11,15 @@ class ResearchReportPayload(BaseModel):
     title: str = ""
     executive_summary: str = ""
     key_findings: list[str] = Field(default_factory=list)
+    detailed_analysis: str = ""
     evidence_summary: str = ""
     sources_reviewed: list[str] = Field(default_factory=list)
+    references: list[dict[str, Any]] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     methodology: str = ""
     iterations: int = 0
+    confidence_score: float | None = None
+    contradictions_noted: list[str] = Field(default_factory=list)
     verification: dict[str, Any] | None = None
 
 

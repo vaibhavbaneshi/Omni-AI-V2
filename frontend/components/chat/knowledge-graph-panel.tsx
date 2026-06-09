@@ -32,7 +32,6 @@ export function KnowledgeGraphPanel({
   const [searchQuery, setSearchQuery] = useState("");
 
   const loadGraph = useCallback(async () => {
-    if (!token) return;
     setLoading(true);
     setError(null);
     try {

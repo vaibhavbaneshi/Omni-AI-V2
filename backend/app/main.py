@@ -41,6 +41,11 @@ from app.api.search_routes import router as search_router
 from app.api.graph_routes import router as graph_router
 from app.api.audit_routes import audit_router, connector_router
 from app.api.github_connector_routes import router as github_connector_router
+from app.api.autonomous_agent_routes import router as autonomous_agent_router
+from app.api.connector_hub_routes import router as connector_hub_router
+from app.api.marketplace_routes import router as marketplace_router
+from app.api.research_routes import router as research_router
+from app.api.notification_routes import router as notification_router
 from app.middleware.csrf import CSRFMiddleware
 from app.middleware.production import (
     InMemoryRateLimitMiddleware,
@@ -113,6 +118,17 @@ async def lifespan(app: FastAPI):
                 daemon=True,
             ).start()
         app.state.ready = True
+        try:
+            from app.db.session import SessionLocal
+            from app.marketplace.catalog import seed_marketplace_templates
+
+            seed_db = SessionLocal()
+            try:
+                seed_marketplace_templates(seed_db)
+            finally:
+                seed_db.close()
+        except Exception:
+            logger.exception("Marketplace template seed skipped")
     except Exception as exc:
         app.state.startup_error = str(exc)
         logger.critical("Startup failed: %s", exc, exc_info=exc)
@@ -244,3 +260,8 @@ app.include_router(graph_router)
 app.include_router(audit_router)
 app.include_router(connector_router)
 app.include_router(github_connector_router)
+app.include_router(autonomous_agent_router)
+app.include_router(connector_hub_router)
+app.include_router(marketplace_router)
+app.include_router(research_router)
+app.include_router(notification_router)

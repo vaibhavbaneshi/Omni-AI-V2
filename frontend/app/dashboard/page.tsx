@@ -497,7 +497,23 @@ export default function DashboardPage() {
               <p className="text-sm text-muted-foreground">Audit center, RBAC, deep research</p>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Link href="/agents" className="rounded-lg border border-white/10 bg-card/55 p-4 hover:border-primary/30">
+              <p className="font-medium">Agent Workspace</p>
+              <p className="text-xs text-muted-foreground mt-1">Schedule and monitor autonomous agents</p>
+            </Link>
+            <Link href="/connectors" className="rounded-lg border border-white/10 bg-card/55 p-4 hover:border-primary/30">
+              <p className="font-medium">Connectors</p>
+              <p className="text-xs text-muted-foreground mt-1">GitHub, Notion, Drive, Dropbox, Confluence</p>
+            </Link>
+            <Link href="/marketplace" className="rounded-lg border border-white/10 bg-card/55 p-4 hover:border-primary/30">
+              <p className="font-medium">Agent Marketplace</p>
+              <p className="text-xs text-muted-foreground mt-1">Install reusable agent templates</p>
+            </Link>
+            <Link href="/knowledge-graph" className="rounded-lg border border-white/10 bg-card/55 p-4 hover:border-primary/30">
+              <p className="font-medium">Knowledge Graph</p>
+              <p className="text-xs text-muted-foreground mt-1">Explore entities and relationships</p>
+            </Link>
             <Link href="/admin/audit" className="rounded-lg border border-white/10 bg-card/55 p-4 hover:border-primary/30">
               <p className="font-medium">Audit Center</p>
               <p className="text-xs text-muted-foreground mt-1">Security events & exports</p>

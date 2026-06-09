@@ -6,7 +6,7 @@ from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
 from app.models.chat_session import ChatSession
-from app.models.document import DocumentRecord
+from app.models.document import DocumentCollection, DocumentRecord
 from app.models.document_insight import DocumentInsight
 from app.models.message import Message
 
@@ -26,6 +26,7 @@ def global_search(
     workspace_id: str = "default",
     limit: int = 20,
     types: set[str] | None = None,
+    source: str | None = None,
 ) -> dict:
     needle = (query or "").strip()
     if len(needle) < 2:
@@ -93,17 +94,27 @@ def global_search(
             )
 
     if "document" in allowed:
-        documents = (
-            db.query(DocumentRecord)
-            .filter(
-                DocumentRecord.user_id == user_id,
-                DocumentRecord.workspace_id == workspace_id,
-                DocumentRecord.filename.ilike(pattern),
-            )
-            .order_by(DocumentRecord.created_at.desc())
-            .limit(per_type_limit)
-            .all()
+        doc_query = db.query(DocumentRecord).filter(
+            DocumentRecord.user_id == user_id,
+            DocumentRecord.workspace_id == workspace_id,
+            DocumentRecord.filename.ilike(pattern),
         )
+        if source:
+            source_collections = (
+                db.query(DocumentCollection.id)
+                .filter(
+                    DocumentCollection.user_id == user_id,
+                    DocumentCollection.workspace_id == workspace_id,
+                    DocumentCollection.name.ilike(f"%{source}%"),
+                )
+                .all()
+            )
+            collection_ids = [row.id for row in source_collections]
+            if collection_ids:
+                doc_query = doc_query.filter(DocumentRecord.collection_id.in_(collection_ids))
+            else:
+                doc_query = doc_query.filter(DocumentRecord.id == -1)
+        documents = doc_query.order_by(DocumentRecord.created_at.desc()).limit(per_type_limit).all()
         counts["document"] = len(documents)
         results.extend(
             {

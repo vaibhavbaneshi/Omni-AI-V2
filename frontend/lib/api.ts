@@ -1453,3 +1453,105 @@ export async function syncGitHubRepo(
 export function getGitHubConnectorAuthorizeUrl() {
   return `${API_BASE}/connectors/github/authorize`;
 }
+
+export type AutonomousAgentRecord = {
+  id: number;
+  name: string;
+  agent_type: string;
+  status: string;
+  schedule_kind: string;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+};
+
+export async function listAutonomousAgents(token?: string | null) {
+  return apiRequest<{ agents: AutonomousAgentRecord[] }>("/agents/workspace", {}, token);
+}
+
+export async function createAutonomousAgent(
+  body: {
+    name: string;
+    agent_type: string;
+    description?: string;
+    config?: Record<string, unknown>;
+    schedule_kind?: string;
+  },
+  token?: string | null
+) {
+  return apiRequest<AutonomousAgentRecord>("/agents/workspace", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }, token);
+}
+
+export async function runAutonomousAgent(agentId: number, token?: string | null) {
+  return apiRequest<{ queued: boolean; execution?: Record<string, unknown> }>(
+    `/agents/workspace/${agentId}/run`,
+    { method: "POST" },
+    token
+  );
+}
+
+export async function pauseAutonomousAgent(agentId: number, token?: string | null) {
+  return apiRequest<AutonomousAgentRecord>(`/agents/workspace/${agentId}/pause`, { method: "POST" }, token);
+}
+
+export async function resumeAutonomousAgent(agentId: number, token?: string | null) {
+  return apiRequest<AutonomousAgentRecord>(`/agents/workspace/${agentId}/resume`, { method: "POST" }, token);
+}
+
+export async function deleteAutonomousAgent(agentId: number, token?: string | null) {
+  return apiRequest<{ deleted: boolean }>(`/agents/workspace/${agentId}`, { method: "DELETE" }, token);
+}
+
+export async function getConnectorHubStatus(token?: string | null) {
+  return apiRequest<{ connectors: Array<Record<string, unknown>> }>("/connectors/hub/status", {}, token);
+}
+
+export async function connectConnectorHub(
+  connectorType: string,
+  credentials: Record<string, unknown>,
+  token?: string | null
+) {
+  return apiRequest<Record<string, unknown>>("/connectors/hub/connect", {
+    method: "POST",
+    body: JSON.stringify({ connector_type: connectorType, credentials }),
+  }, token);
+}
+
+export async function syncConnectorHub(connectorType: string, token?: string | null) {
+  return apiRequest<Record<string, unknown>>(`/connectors/hub/${connectorType}/sync`, {
+    method: "POST",
+    body: JSON.stringify({ workspace_id: "default" }),
+  }, token);
+}
+
+export async function listMarketplaceTemplates(token?: string | null) {
+  return apiRequest<{ templates: Array<Record<string, unknown>> }>("/marketplace/templates", {}, token);
+}
+
+export async function installMarketplaceTemplate(slug: string, token?: string | null) {
+  return apiRequest<{ agent: AutonomousAgentRecord }>(`/marketplace/templates/${slug}/install`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  }, token);
+}
+
+export async function listNotifications(token?: string | null) {
+  return apiRequest<{ notifications: Array<Record<string, unknown>> }>("/notifications", {}, token);
+}
+
+export async function runDeepResearch(body: { query: string; max_iterations?: number }, token?: string | null) {
+  return apiRequest<ResearchReportRecord>("/research/run", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }, token);
+}
+
+export function researchExportMarkdownUrl(reportId: number) {
+  return `${API_BASE}/research/reports/${reportId}/export/markdown`;
+}
+
+export function researchExportPdfUrl(reportId: number) {
+  return `${API_BASE}/research/reports/${reportId}/export/pdf`;
+}

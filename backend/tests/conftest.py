@@ -39,6 +39,9 @@ from app.models import knowledge_graph  # noqa: F401
 from app.models import agent_trace  # noqa: F401
 from app.models import rbac  # noqa: F401
 from app.models import github_connector  # noqa: F401
+from app.models import autonomous_agent  # noqa: F401
+from app.models import connector_hub  # noqa: F401
+from app.models import marketplace  # noqa: F401
 from app.models import research_report  # noqa: F401 — register research reports
 from app.models import chat_folder  # noqa: F401 — register chat folders
 from app.models.chat_session import ChatSession

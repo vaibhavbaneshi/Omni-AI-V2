@@ -70,3 +70,43 @@ def analytics_cache_metrics(
     if not user_has_admin_access(current_user):
         raise HTTPException(status_code=403, detail="Cache metrics require admin access.")
     return cache_metrics()
+
+
+@router.get("/agents")
+def analytics_agent_metrics(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.models.autonomous_agent import AgentExecution, AutonomousAgent
+
+    agents = db.query(AutonomousAgent).filter(AutonomousAgent.user_id == current_user.id).count()
+    executions = (
+        db.query(AgentExecution)
+        .filter(AgentExecution.user_id == current_user.id)
+        .order_by(AgentExecution.started_at.desc())
+        .limit(100)
+        .all()
+    )
+    complete = sum(1 for row in executions if row.status == "complete")
+    failed = sum(1 for row in executions if row.status == "failed")
+    tokens = sum(row.tokens_used or 0 for row in executions)
+    latency = [row.latency_ms for row in executions if row.latency_ms]
+    avg_latency = round(sum(latency) / len(latency), 2) if latency else 0
+    return {
+        "agents_total": agents,
+        "runs_total": len(executions),
+        "runs_complete": complete,
+        "runs_failed": failed,
+        "tokens_total": tokens,
+        "avg_latency_ms": avg_latency,
+        "recent": [
+            {
+                "id": row.id,
+                "agent_id": row.agent_id,
+                "status": row.status,
+                "latency_ms": row.latency_ms,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+            }
+            for row in executions[:20]
+        ],
+    }

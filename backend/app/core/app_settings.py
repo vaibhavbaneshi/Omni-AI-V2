@@ -161,6 +161,24 @@ class AppSettings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
+    NOTION_API_KEY: str = ""
+    CONFLUENCE_BASE_URL: str = ""
+    CONFLUENCE_EMAIL: str = ""
+    CONFLUENCE_API_TOKEN: str = ""
+    DROPBOX_APP_KEY: str = ""
+    DROPBOX_APP_SECRET: str = ""
+
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_USE_TLS: bool = True
+
+    ENABLE_AUTONOMOUS_AGENTS: bool = True
+    ENABLE_CONNECTOR_HUB: bool = True
+    ENABLE_AGENT_MARKETPLACE: bool = True
+
     TAVILY_API_KEY: str = ""
     SERPER_API_KEY: str = ""
     WEB_SEARCH_PROVIDER: str = "tavily"

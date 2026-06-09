@@ -23,6 +23,7 @@ def search_workspace(
         default=None,
         description="Comma-separated result types: session,message,document,insight",
     ),
+    source: str | None = Query(default=None, description="Filter documents by connector collection source name"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -37,5 +38,6 @@ def search_workspace(
         workspace_id=workspace_id,
         limit=limit,
         types=allowed,
+        source=source,
     )
     return payload
