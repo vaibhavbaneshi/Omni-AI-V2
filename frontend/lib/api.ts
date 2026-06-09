@@ -1492,11 +1492,11 @@ export async function runResearchReport(
 }
 
 export async function getGitHubConnectorStatus(token?: string | null) {
-  return apiRequest<{ connected: boolean; github_login?: string | null }>(
-    "/connectors/github/status",
-    {},
-    token
-  );
+  return apiRequest<{
+    connected: boolean;
+    github_login?: string | null;
+    signed_in_with_github?: boolean;
+  }>("/connectors/github/status", {}, token);
 }
 
 export async function listGitHubRepos(token?: string | null) {
@@ -1526,8 +1526,13 @@ export async function syncGitHubRepo(
   );
 }
 
-export function getGitHubConnectorAuthorizeUrl() {
-  return `${API_BASE}/connectors/github/authorize`;
+export async function getGitHubConnectorAuthorizeUrl(token?: string | null, nextPath = "/chat") {
+  const params = new URLSearchParams({ next: nextPath });
+  return apiRequest<{ authorize_url: string }>(
+    `/connectors/github/authorize-url?${params.toString()}`,
+    {},
+    token
+  );
 }
 
 export type AutonomousAgentRecord = {

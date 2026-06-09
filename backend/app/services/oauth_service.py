@@ -28,12 +28,14 @@ def _sign_payload(payload: str) -> str:
     ).hexdigest()
 
 
-def encode_oauth_state(provider: str, next_path: str) -> str:
-    payload = {
+def encode_oauth_state(provider: str, next_path: str, *, user_id: int | None = None) -> str:
+    payload: dict[str, Any] = {
         "provider": provider,
         "next": next_path,
         "nonce": secrets.token_urlsafe(16),
     }
+    if user_id is not None:
+        payload["user_id"] = user_id
     encoded = base64.urlsafe_b64encode(
         json.dumps(payload).encode("utf-8")
     ).decode("utf-8")
@@ -65,7 +67,7 @@ def build_github_authorize_url(
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "read:user user:email",
+        "scope": "read:user user:email repo",
         "state": state,
     }
     return f"{GITHUB_AUTHORIZE_URL}?{urlencode(params)}"
@@ -170,6 +172,8 @@ def fetch_github_profile(access_token: str) -> dict[str, str]:
         "email": email,
         "username": email,
         "name": name,
+        "github_user_id": str(user["id"]),
+        "github_login": login,
     }
 
 

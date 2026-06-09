@@ -42,6 +42,10 @@ from app.services.oauth_service import (
     fetch_google_profile,
     get_or_create_oauth_user,
 )
+from app.services.github_connector_service import (
+    connect_github_account_from_token,
+    link_github_account_from_login,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -295,6 +299,7 @@ def github_callback(
         state_payload = decode_oauth_state(state)
         next_path = _sanitize_next_path(state_payload.get("next"))
         redirect_uri = f"{settings['api_public_url']}/auth/github/callback"
+        provider = state_payload.get("provider", "github")
 
         access_token = exchange_github_code(
             client_id=settings["github_client_id"],
@@ -302,8 +307,29 @@ def github_callback(
             code=code,
             redirect_uri=redirect_uri,
         )
+
+        if provider == "github_connector":
+            user_id = state_payload.get("user_id")
+            if not user_id:
+                return _redirect_to_frontend_error("Invalid GitHub connector authorization.")
+            user = db.query(User).filter(User.id == int(user_id)).first()
+            if not user:
+                return _redirect_to_frontend_error("User not found for GitHub connector.")
+            connect_github_account_from_token(db, user=user, access_token=access_token)
+            frontend = get_settings().FRONTEND_URL.rstrip("/")
+            return RedirectResponse(
+                f"{frontend}{next_path}?github=connected",
+                status_code=302,
+            )
+
         profile = fetch_github_profile(access_token)
         user = get_or_create_oauth_user(db, profile, provider="github")
+        link_github_account_from_login(
+            db,
+            user_id=user.id,
+            access_token=access_token,
+            profile=profile,
+        )
         token, refresh_token = _issue_session_tokens(db=db, user=user, request=request)
 
         return _redirect_to_frontend_success(

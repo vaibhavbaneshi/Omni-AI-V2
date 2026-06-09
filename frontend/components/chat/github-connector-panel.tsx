@@ -23,6 +23,7 @@ export function GitHubConnectorPanel({
 }: GitHubConnectorPanelProps) {
   const [connected, setConnected] = useState(false);
   const [githubLogin, setGithubLogin] = useState<string | null>(null);
+  const [statusSignedInWithGitHub, setStatusSignedInWithGitHub] = useState(false);
   const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState<string | null>(null);
@@ -35,6 +36,7 @@ export function GitHubConnectorPanel({
       const status = await getGitHubConnectorStatus(token);
       setConnected(status.connected);
       setGithubLogin(status.github_login ?? null);
+      setStatusSignedInWithGitHub(Boolean(status.signed_in_with_github));
       if (status.connected) {
         const data = await listGitHubRepos(token);
         setRepos(data.repositories);
@@ -52,8 +54,24 @@ export function GitHubConnectorPanel({
     void load();
   }, [load]);
 
-  const handleConnect = () => {
-    window.location.href = getGitHubConnectorAuthorizeUrl();
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("github") === "connected") {
+      void load();
+      params.delete("github");
+      const suffix = params.size ? `?${params.toString()}` : "";
+      window.history.replaceState({}, "", `${window.location.pathname}${suffix}`);
+    }
+  }, [load]);
+
+  const handleConnect = async () => {
+    setError(null);
+    try {
+      const { authorize_url } = await getGitHubConnectorAuthorizeUrl(token, "/chat");
+      window.location.href = authorize_url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start GitHub authorization.");
+    }
   };
 
   const handleSync = async (repoFullName: string) => {
@@ -108,9 +126,11 @@ export function GitHubConnectorPanel({
         <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-6 text-center">
           <p className="text-[13px] font-medium">Not connected</p>
           <p className="mt-1 text-[12px] text-muted-foreground/60 mb-4">
-            Authorize GitHub to list and sync your repositories.
+            {statusSignedInWithGitHub
+              ? "Your GitHub sign-in will be linked automatically after you sign in again. You can also connect manually below."
+              : "Authorize GitHub to list and sync your repositories."}
           </p>
-          <Button type="button" size="sm" onClick={handleConnect}>
+          <Button type="button" size="sm" onClick={() => void handleConnect()}>
             Connect GitHub
           </Button>
         </div>

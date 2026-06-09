@@ -40,6 +40,7 @@ from app.services.github_connector_service import (
     build_connector_authorize_url,
     get_connection,
     handle_connector_callback,
+    link_github_account_from_login,
     list_repositories,
     save_connection,
     sync_repository,
@@ -309,15 +310,36 @@ def test_github_save_and_get_connection(db_session):
     assert updated.github_login == "octocat2"
 
 
+def test_link_github_account_from_login(db_session):
+    user = UserFactory()
+    profile = {
+        "github_user_id": "456",
+        "github_login": "devuser",
+        "email": user.email,
+        "username": user.email,
+        "name": "Dev User",
+    }
+    connection = link_github_account_from_login(
+        db_session,
+        user_id=user.id,
+        access_token="gh-login-token",
+        profile=profile,
+    )
+    assert connection.github_login == "devuser"
+    assert get_connection(db_session, user_id=user.id) is not None
+
+
 def test_github_build_authorize_url():
     with patch("app.services.github_connector_service.get_oauth_settings") as mock_settings:
         mock_settings.return_value = {
             "github_client_id": "client-id",
             "api_public_url": "http://localhost:8000",
         }
-        url = build_connector_authorize_url(next_path="/dashboard")
+        url = build_connector_authorize_url(user_id=42, next_path="/chat")
     assert "github.com/login/oauth/authorize" in url
     assert "client_id=client-id" in url
+    assert "redirect_uri=" in url
+    assert "%2Fauth%2Fgithub%2Fcallback" in url or "/auth/github/callback" in url
 
 
 def test_github_handle_connector_callback(db_session):
@@ -478,6 +500,14 @@ def test_github_connector_routes(_mock, auth_client, db_session):
     response = auth_client.get("/connectors/github/status", headers=auth_client.auth_headers)
     assert response.status_code == 200
     assert response.json()["connected"] is False
+
+    response = auth_client.get(
+        "/connectors/github/authorize-url?next=/chat",
+        headers=auth_client.auth_headers,
+    )
+    assert response.status_code == 200
+    assert "authorize_url" in response.json()
+    assert "github.com/login/oauth/authorize" in response.json()["authorize_url"]
 
     with patch(
         "app.api.github_connector_routes.list_repositories",

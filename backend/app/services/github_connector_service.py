@@ -23,7 +23,13 @@ from app.services.security_audit_service import audit_log
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
+GITHUB_OAUTH_SCOPES = "read:user user:email repo"
 INDEXABLE_EXTENSIONS = {".md", ".markdown", ".txt", ".py", ".js", ".ts", ".tsx", ".json", ".yaml", ".yml", ".rst", ".html"}
+
+
+def github_oauth_redirect_uri() -> str:
+    settings = get_oauth_settings()
+    return f"{settings['api_public_url']}/auth/github/callback"
 
 
 def get_connection(db: Session, *, user_id: int) -> GitHubConnection | None:
@@ -59,18 +65,52 @@ def save_connection(
     return record
 
 
-def build_connector_authorize_url(*, next_path: str = "/dashboard") -> str:
+def build_connector_authorize_url(*, user_id: int, next_path: str = "/chat") -> str:
     settings = get_oauth_settings()
-    state = encode_oauth_state("github_connector", next_path)
+    state = encode_oauth_state("github_connector", next_path, user_id=user_id)
     params = urlencode(
         {
             "client_id": settings["github_client_id"],
-            "redirect_uri": f"{settings['api_public_url']}/connectors/github/callback",
-            "scope": "read:user repo",
+            "redirect_uri": github_oauth_redirect_uri(),
+            "scope": GITHUB_OAUTH_SCOPES,
             "state": state,
         }
     )
     return f"https://github.com/login/oauth/authorize?{params}"
+
+
+def link_github_account_from_login(
+    db: Session,
+    *,
+    user_id: int,
+    access_token: str,
+    profile: dict[str, str],
+) -> GitHubConnection:
+    return save_connection(
+        db,
+        user_id=user_id,
+        github_user_id=profile["github_user_id"],
+        github_login=profile["github_login"],
+        access_token=access_token,
+        scopes=GITHUB_OAUTH_SCOPES,
+    )
+
+
+def connect_github_account_from_token(
+    db: Session,
+    *,
+    user: User,
+    access_token: str,
+) -> GitHubConnection:
+    profile = _github_get(access_token, "/user")
+    return save_connection(
+        db,
+        user_id=user.id,
+        github_user_id=str(profile["id"]),
+        github_login=profile["login"],
+        access_token=access_token,
+        scopes=GITHUB_OAUTH_SCOPES,
+    )
 
 
 def handle_connector_callback(
@@ -80,24 +120,15 @@ def handle_connector_callback(
     code: str,
     state: str,
 ) -> GitHubConnection:
-    settings = get_oauth_settings()
     decode_oauth_state(state)
-    redirect_uri = f"{settings['api_public_url']}/connectors/github/callback"
+    settings = get_oauth_settings()
     access_token = exchange_github_code(
         client_id=settings["github_client_id"],
         client_secret=settings["github_client_secret"],
         code=code,
-        redirect_uri=redirect_uri,
+        redirect_uri=github_oauth_redirect_uri(),
     )
-    profile = _github_get(access_token, "/user")
-    return save_connection(
-        db,
-        user_id=user.id,
-        github_user_id=str(profile["id"]),
-        github_login=profile["login"],
-        access_token=access_token,
-        scopes="read:user repo",
-    )
+    return connect_github_account_from_token(db, user=user, access_token=access_token)
 
 
 def list_repositories(db: Session, *, user_id: int) -> list[dict[str, Any]]:
