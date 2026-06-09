@@ -420,12 +420,15 @@ def test_github_sync_repository_indexes_files(mock_ingest, db_session):
         if "/git/trees/" in path:
             return {
                 "tree": [
-                    {"type": "blob", "path": "README.md", "size": 20},
+                    {"type": "blob", "path": "README.md", "size": 20, "sha": "blob-readme"},
+                    {"type": "blob", "path": "frontend/src/App.jsx", "size": 40, "sha": "blob-app"},
                     {"type": "tree", "path": "src", "size": 0},
                 ]
             }
-        if path.endswith("/contents/README.md"):
+        if "/git/blobs/blob-readme" in path:
             return {"encoding": "base64", "content": encoded}
+        if "/git/blobs/blob-app" in path:
+            return {"encoding": "base64", "content": base64.b64encode(b"export default function App() {}").decode()}
         raise AssertionError(f"Unexpected path: {path}")
 
     with patch("app.services.github_connector_service._github_get", side_effect=fake_github_get):
@@ -436,8 +439,8 @@ def test_github_sync_repository_indexes_files(mock_ingest, db_session):
             workspace_id="default",
         )
     assert result["status"] == "complete"
-    assert result["files_indexed"] == 1
-    mock_ingest.assert_called_once()
+    assert result["files_indexed"] == 2
+    assert mock_ingest.call_count == 2
 
 
 def test_github_sync_repository_returns_unchanged(db_session):
@@ -473,6 +476,41 @@ def test_github_sync_repository_returns_unchanged(db_session):
         result = sync_repository(db_session, user=user, repo_full_name="acme/docs")
     assert result["status"] == "unchanged"
     assert result["files_indexed"] == 3
+
+
+def test_github_sync_skips_node_modules(db_session):
+    user = UserFactory()
+    save_connection(
+        db_session,
+        user_id=user.id,
+        github_user_id="1",
+        github_login="dev",
+        access_token="token",
+    )
+
+    def fake_github_get(token, path, params=None):
+        if path == "/repos/acme/app":
+            return {"default_branch": "main"}
+        if "/commits/" in path:
+            return {"sha": "commit123"}
+        if "/git/trees/" in path:
+            return {
+                "tree": [
+                    {"type": "blob", "path": "node_modules/react/index.js", "size": 20, "sha": "skip"},
+                    {"type": "blob", "path": "backend/server.js", "size": 30, "sha": "blob-server"},
+                ]
+            }
+        if "/git/blobs/blob-server" in path:
+            import base64
+
+            return {"encoding": "base64", "content": base64.b64encode(b"console.log('ok')").decode()}
+        raise AssertionError(path)
+
+    with patch("app.services.ingestion_service.run_ingest_document_record") as mock_ingest:
+        with patch("app.services.github_connector_service._github_get", side_effect=fake_github_get):
+            result = sync_repository(db_session, user=user, repo_full_name="acme/app")
+    assert result["files_indexed"] == 1
+    mock_ingest.assert_called_once()
 
 
 def test_github_sync_requires_connection(db_session):

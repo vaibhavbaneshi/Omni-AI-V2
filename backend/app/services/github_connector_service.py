@@ -23,7 +23,67 @@ logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
 GITHUB_OAUTH_SCOPES = "read:user user:email repo"
-INDEXABLE_EXTENSIONS = {".md", ".markdown", ".txt", ".py", ".js", ".ts", ".tsx", ".json", ".yaml", ".yml", ".rst", ".html"}
+INDEXABLE_EXTENSIONS = {
+    ".md",
+    ".markdown",
+    ".txt",
+    ".rst",
+    ".py",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".html",
+    ".htm",
+    ".css",
+    ".scss",
+    ".sass",
+    ".less",
+    ".vue",
+    ".java",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+    ".sql",
+    ".sh",
+    ".bash",
+    ".xml",
+    ".csv",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".env",
+    ".dockerfile",
+}
+SKIP_PATH_SEGMENTS = {
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".next",
+    "coverage",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "target",
+    "bin",
+    "obj",
+    ".idea",
+    ".vscode",
+    ".cache",
+    "chroma_db",
+    ".turbo",
+    ".pnpm-store",
+}
+MAX_INDEXABLE_FILE_BYTES = 512_000
 
 
 def github_oauth_redirect_uri() -> str:
@@ -191,7 +251,12 @@ def sync_repository(
         commit = _github_get(connection.access_token, f"/repos/{repo_full_name}/commits/{branch}")
         commit_sha = commit["sha"]
 
-        if sync and sync.last_commit_sha == commit_sha and sync.sync_status == "complete":
+        if (
+            sync
+            and sync.last_commit_sha == commit_sha
+            and sync.sync_status == "complete"
+            and sync.files_indexed > 0
+        ):
             return {"status": "unchanged", "files_indexed": sync.files_indexed, "commit_sha": commit_sha}
 
         collection = _ensure_collection(db, user=user, workspace_id=workspace_id)
@@ -220,23 +285,32 @@ def sync_repository(
 
         files_indexed = 0
         skipped_files = 0
+        skipped_ignored_path = 0
+        skipped_extension = 0
+        skipped_too_large = 0
         for item in tree.get("tree", []):
             if item.get("type") != "blob":
                 continue
             path = item.get("path", "")
-            ext = os.path.splitext(path)[1].lower()
-            if ext not in INDEXABLE_EXTENSIONS:
+            if _should_skip_repo_path(path):
+                skipped_ignored_path += 1
                 continue
-            if item.get("size", 0) > 512_000:
+            ext = os.path.splitext(path)[1].lower()
+            if ext == "" and os.path.basename(path).lower() == "dockerfile":
+                ext = ".dockerfile"
+            if ext not in INDEXABLE_EXTENSIONS:
+                skipped_extension += 1
+                continue
+            size = int(item.get("size") or 0)
+            if size > MAX_INDEXABLE_FILE_BYTES:
+                skipped_too_large += 1
+                continue
+            blob_sha = item.get("sha")
+            if not blob_sha:
                 skipped_files += 1
                 continue
             try:
-                content = _github_get_raw(
-                    connection.access_token,
-                    f"/repos/{repo_full_name}/contents/{path}",
-                    params={"ref": branch},
-                )
-                text = _decode_content(content)
+                text = _fetch_blob_text(connection.access_token, repo_full_name, blob_sha)
                 if not text.strip():
                     continue
                 _index_github_file(
@@ -262,6 +336,9 @@ def sync_repository(
             "branch": branch,
             "commit_sha": commit_sha,
             "skipped_files": skipped_files,
+            "skipped_ignored_path": skipped_ignored_path,
+            "skipped_extension": skipped_extension,
+            "skipped_too_large": skipped_too_large,
         }
         db.commit()
 
@@ -401,13 +478,30 @@ def _index_github_file(
         run_ingest_document_record(db, document.id)
 
 
+def _should_skip_repo_path(path: str) -> bool:
+    parts = path.replace("\\", "/").split("/")
+    return any(part in SKIP_PATH_SEGMENTS for part in parts)
+
+
+def _fetch_blob_text(token: str, repo_full_name: str, blob_sha: str) -> str:
+    import base64
+
+    payload = _github_get(token, f"/repos/{repo_full_name}/git/blobs/{blob_sha}")
+    content = payload.get("content")
+    if not content:
+        return ""
+    if payload.get("encoding") == "base64":
+        return base64.b64decode(content).decode("utf-8", errors="replace")
+    return str(content)
+
+
 def _github_get(token: str, path: str, params: dict | None = None) -> Any:
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    response = httpx.get(f"{GITHUB_API}{path}", headers=headers, params=params, timeout=30)
+    response = httpx.get(f"{GITHUB_API}{path}", headers=headers, params=params, timeout=60)
     response.raise_for_status()
     return response.json()
 

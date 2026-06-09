@@ -77,7 +77,7 @@ export function GitHubConnectorPanel({
             setSuccess(
               count > 0
                 ? `Synced ${count} file${count === 1 ? "" : "s"} from ${repoFullName}. Check the GitHub collection in Files.`
-                : `Sync finished for ${repoFullName}, but no indexable files were found (code/docs under 512KB).`
+                : `Sync finished for ${repoFullName}, but no indexable source files were found. Try a repo with .js, .jsx, .ts, .md, or .py files outside node_modules.`
             );
             void onDocumentsRefresh?.();
           } else if (syncStatus === "failed") {
@@ -134,14 +134,14 @@ export function GitHubConnectorPanel({
         pollUntilSettled(repoFullName);
         return;
       }
-      if (result.status === "unchanged") {
+            if (result.status === "unchanged") {
         setSuccess(`Already up to date (${result.files_indexed ?? 0} indexed files).`);
       } else {
         const count = result.files_indexed ?? 0;
         setSuccess(
           count > 0
             ? `Synced ${count} file${count === 1 ? "" : "s"} from ${repoFullName}.`
-            : `Sync finished, but no indexable files were found in ${repoFullName}.`
+            : `Sync finished for ${repoFullName}, but no indexable source files were found. Supported: code and docs in folders like frontend/ or backend/ (.js, .jsx, .ts, .py, .md, etc.). node_modules and build folders are skipped.`
         );
       }
       await load();
