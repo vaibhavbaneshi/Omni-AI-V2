@@ -136,7 +136,8 @@ export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
   token?: string | null,
-  retryAuth = true
+  retryAuth = true,
+  suppressAuthRedirect = false
 ): Promise<T> {
   const headers = new Headers(options.headers);
   const authToken = resolveAuthToken(token);
@@ -176,10 +177,10 @@ export async function apiRequest<T>(
       if (retryAuth && !path.startsWith("/auth/")) {
         const refreshed = await refreshAccessToken();
         if (refreshed) {
-          return apiRequest<T>(path, options, refreshed, false);
+          return apiRequest<T>(path, options, refreshed, false, suppressAuthRedirect);
         }
       }
-      if (shouldTriggerAuthExpiration(path)) {
+      if (!suppressAuthRedirect && shouldTriggerAuthExpiration(path)) {
         handleAuthExpiration(response.status, AUTH_EXPIRED_MESSAGE);
       }
       throw new AuthExpiredError(
@@ -1688,15 +1689,27 @@ export type NotificationRecord = {
 };
 
 export async function listNotifications(token?: string | null) {
-  return apiRequest<{ notifications: NotificationRecord[] }>("/notifications", {}, token);
+  return apiRequest<{ notifications: NotificationRecord[] }>(
+    "/notifications",
+    {},
+    token,
+    true,
+    true
+  );
 }
 
 export async function getNotificationUnreadCount(token?: string | null) {
-  return apiRequest<{ count: number }>("/notifications/unread-count", {}, token);
+  return apiRequest<{ count: number }>("/notifications/unread-count", {}, token, true, true);
 }
 
 export async function markNotificationRead(notificationId: number, token?: string | null) {
-  return apiRequest<{ read: boolean }>(`/notifications/${notificationId}/read`, { method: "POST" }, token);
+  return apiRequest<{ read: boolean }>(
+    `/notifications/${notificationId}/read`,
+    { method: "POST" },
+    token,
+    true,
+    true
+  );
 }
 
 export async function downloadResearchExport(reportId: number, format: "markdown" | "pdf", token?: string | null) {

@@ -33,22 +33,28 @@ export function useNotifications(enabled = true) {
       setNotifications(data.notifications.slice(0, 10));
       await refreshUnreadCount();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load notifications.");
+      const message = err instanceof Error ? err.message : "Failed to load notifications.";
+      setError(
+        message.includes("500")
+          ? "Notifications are unavailable. Ensure the backend migration 20260608_0016 has been applied."
+          : message
+      );
     } finally {
       setLoading(false);
     }
   }, [enabled, refreshUnreadCount]);
 
-  const markRead = useCallback(
-    async (notificationId: number) => {
+  const markRead = useCallback(async (notificationId: number) => {
+    try {
       await markNotificationRead(notificationId);
       setNotifications((prev) =>
         prev.map((item) => (item.id === notificationId ? { ...item, read: true } : item))
       );
       setUnreadCount((prev) => Math.max(0, prev - 1));
-    },
-    []
-  );
+    } catch {
+      // Keep UI responsive if mark-read fails.
+    }
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
