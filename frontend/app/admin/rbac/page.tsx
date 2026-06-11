@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Shield, Loader2 } from "lucide-react";
+import { BackButton } from "@/components/navigation/back-button";
 import { useRequireAuth } from "@/lib/auth";
 import { assignUserRole, getAuditUsers } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -52,7 +53,7 @@ export default function RbacAdminPage() {
             </h1>
             <p className="text-sm text-muted-foreground mt-1">Assign roles — admin only</p>
           </div>
-          <Link href="/dashboard"><Button variant="outline" size="sm">Back</Button></Link>
+          <BackButton variant="outline" />
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <Card className="border-white/10 bg-card/65">

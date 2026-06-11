@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { Network } from "lucide-react";
+import { BackButton } from "@/components/navigation/back-button";
 import { useRequireAuth } from "@/lib/auth";
 import { KnowledgeGraphPanel } from "@/components/chat/knowledge-graph-panel";
-import { Button } from "@/components/ui/button";
 
 export default function KnowledgeGraphPage() {
   const { session, ready, authenticated } = useRequireAuth();
@@ -22,7 +21,7 @@ export default function KnowledgeGraphPage() {
             </h1>
             <p className="text-sm text-muted-foreground mt-1">Explore entities and relationships across your workspace</p>
           </div>
-          <Link href="/dashboard"><Button variant="outline" size="sm">Dashboard</Button></Link>
+          <BackButton variant="outline" />
         </div>
         <KnowledgeGraphPanel embedded workspaceId="default" token={session?.token} />
       </div>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Cable, Loader2, RefreshCw } from "lucide-react";
+import { BackButton } from "@/components/navigation/back-button";
 import { useRequireAuth } from "@/lib/auth";
 import { connectConnectorHub, getConnectorHubStatus, syncConnectorHub } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -175,7 +176,7 @@ export default function ConnectorsPage() {
             </h1>
             <p className="text-sm text-muted-foreground mt-1">Connect sources and sync into your knowledge hub</p>
           </div>
-          <Link href="/dashboard"><Button variant="outline" size="sm">Dashboard</Button></Link>
+          <BackButton variant="outline" />
         </div>
 
         {error && <p className="text-sm text-destructive">{error}</p>}

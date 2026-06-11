@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Activity, Loader2, Download } from "lucide-react";
+import { BackButton } from "@/components/navigation/back-button";
 import { useRequireAuth } from "@/lib/auth";
 import { getAuditEvents, getAuditOverview, API_BASE } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -48,7 +49,7 @@ export default function AuditCenterPage() {
               <Button variant="outline" size="sm"><Download className="size-4 mr-1" />Export CSV</Button>
             </a>
             <Link href="/admin/rbac"><Button variant="outline" size="sm">RBAC</Button></Link>
-            <Link href="/dashboard"><Button variant="outline" size="sm">Back</Button></Link>
+            <BackButton variant="outline" />
           </div>
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}

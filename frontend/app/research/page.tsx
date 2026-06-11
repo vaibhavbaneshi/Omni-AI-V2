@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { BookOpen, FileDown, Loader2, Search } from "lucide-react";
+import { BackButton } from "@/components/navigation/back-button";
 import { useRequireAuth } from "@/lib/auth";
 import { downloadResearchExport, getResearchReport, runResearchReport, type ResearchReportRecord } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -61,7 +61,7 @@ export default function ResearchPage() {
             </h1>
             <p className="text-sm text-muted-foreground mt-1">Plan → evidence → verification → report</p>
           </div>
-          <Link href="/dashboard"><Button variant="outline" size="sm">Back</Button></Link>
+          <BackButton variant="outline" />
         </div>
         <Card className="border-white/10 bg-card/65">
           <CardHeader><CardTitle>Research query</CardTitle></CardHeader>

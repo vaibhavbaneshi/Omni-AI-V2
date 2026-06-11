@@ -1,13 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Brain,
   Check,
-  ChevronLeft,
   Copy,
   CreditCard,
   Download,
@@ -26,7 +24,8 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { BackButton } from "@/components/navigation/back-button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -416,9 +415,7 @@ export default function SettingsPage() {
       <header className="sticky top-0 z-40 border-b border-white/10 bg-background/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
-            <Link href="/chat" aria-label="Back to chat" className={buttonVariants({ variant: "ghost", size: "icon" })}>
-              <ChevronLeft className="size-4" />
-            </Link>
+            <BackButton fallbackHref="/" />
             <div className="flex min-w-0 items-center gap-2">
               <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/25">
                 <Sparkles className="size-5 text-primary" />

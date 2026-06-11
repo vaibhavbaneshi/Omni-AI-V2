@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { Bot, Loader2, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { BackButton } from "@/components/navigation/back-button";
 import { useRequireAuth } from "@/lib/auth";
 import {
   createAutonomousAgent,
@@ -101,7 +101,7 @@ export default function AgentsPage() {
             </h1>
             <p className="text-sm text-muted-foreground mt-1">Create, schedule, and monitor autonomous agents</p>
           </div>
-          <Link href="/dashboard"><Button variant="outline" size="sm">Dashboard</Button></Link>
+          <BackButton variant="outline" />
         </div>
 
         <Card className="border-white/10 bg-card/65">
