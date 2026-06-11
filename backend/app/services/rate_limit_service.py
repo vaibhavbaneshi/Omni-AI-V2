@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from urllib.parse import urlencode
@@ -35,7 +36,13 @@ class RateLimitRule:
     scope: str
 
 
+def is_test_mode_enabled() -> bool:
+    return os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "yes"}
+
+
 def is_rate_limit_exempt_path(path: str) -> bool:
+    if is_test_mode_enabled():
+        return True
     if path in EXEMPT_PATHS:
         return True
     return any(path.startswith(prefix) for prefix in OAUTH_FLOW_PREFIXES)

@@ -7,7 +7,7 @@ import { KnowledgeGraphPanel } from "@/components/chat/knowledge-graph-panel";
 import { Button } from "@/components/ui/button";
 
 export default function KnowledgeGraphPage() {
-  const { ready, authenticated } = useRequireAuth();
+  const { session, ready, authenticated } = useRequireAuth();
 
   if (!ready || !authenticated) return <div className="min-h-screen bg-background" />;
 
@@ -24,7 +24,7 @@ export default function KnowledgeGraphPage() {
           </div>
           <Link href="/dashboard"><Button variant="outline" size="sm">Dashboard</Button></Link>
         </div>
-        <KnowledgeGraphPanel embedded workspaceId="default" />
+        <KnowledgeGraphPanel embedded workspaceId="default" token={session?.token} />
       </div>
     </div>
   );

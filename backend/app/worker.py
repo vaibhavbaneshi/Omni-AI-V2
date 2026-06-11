@@ -33,6 +33,8 @@ def main() -> int:
 
     from app.core.app_settings import get_settings
     from app.core.redis_client import get_redis_connection
+    from app.jobs.agent_jobs import ensure_agent_poll_scheduled
+    from app.services.agent_scheduler_service import AGENT_QUEUE_NAME
 
     settings = get_settings()
     settings.validate_for_runtime()
@@ -54,7 +56,10 @@ def main() -> int:
     queues = [
         Queue(INGEST_QUEUE_NAME, connection=conn),
         Queue(INGEST_DLQ_NAME, connection=conn),
+        Queue(AGENT_QUEUE_NAME, connection=conn),
     ]
+    # Autonomous agent scheduling requires Redis — poll_due_agents runs every 60s via RQ.
+    ensure_agent_poll_scheduled()
     worker = Worker(queues, connection=conn, name=worker_name)
     worker.work(with_scheduler=True)
     return 0

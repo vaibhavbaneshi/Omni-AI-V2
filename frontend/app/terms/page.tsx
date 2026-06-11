@@ -23,7 +23,7 @@ export default function TermsPage() {
             <p>Subscription, billing, cancellation, and data retention policies should be defined by your production backend and legal team.</p>
           </div>
           <Button asChild className="mt-8">
-            <Link href="/register">Create Account</Link>
+            <Link href="/login">Create Account</Link>
           </Button>
         </div>
       </div>

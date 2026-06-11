@@ -86,6 +86,14 @@ def mark_all_read(db: Session, *, user_id: int) -> int:
     return len(rows)
 
 
+def get_unread_count(db: Session, *, user_id: int) -> int:
+    return (
+        db.query(Notification)
+        .filter(Notification.user_id == user_id, Notification.read.is_(False))
+        .count()
+    )
+
+
 def serialize_notification(row: Notification) -> dict[str, Any]:
     return {
         "id": row.id,

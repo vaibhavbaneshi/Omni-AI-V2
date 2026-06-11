@@ -67,9 +67,17 @@ def execute_agent(
             category="agent",
             link=f"/agents?agent={agent.id}",
         )
+        cfg = dict(agent.config or {})
+        cfg["runtime_status"] = "idle"
+        cfg.pop("last_error", None)
+        agent.config = cfg
     except Exception as exc:
         execution.status = "failed"
         execution.error_message = str(exc)[:2000]
+        cfg = dict(agent.config or {})
+        cfg["runtime_status"] = "error"
+        cfg["last_error"] = str(exc)[:500]
+        agent.config = cfg
         logger.exception("Agent execution failed agent_id=%s", agent.id)
         notify_user(
             db,

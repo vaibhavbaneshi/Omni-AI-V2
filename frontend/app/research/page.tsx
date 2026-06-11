@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { BookOpen, Loader2, Search } from "lucide-react";
+import { BookOpen, FileDown, Loader2, Search } from "lucide-react";
 import { useRequireAuth } from "@/lib/auth";
-import { getResearchReport, runResearchReport, type ResearchReportRecord } from "@/lib/api";
+import { downloadResearchExport, getResearchReport, runResearchReport, type ResearchReportRecord } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,12 +15,15 @@ export default function ResearchPage() {
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<ResearchReportRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<"markdown" | "pdf" | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const handleRun = async () => {
     if (!query.trim()) return;
     setLoading(true);
     setError(null);
     setReport(null);
+    setExportError(null);
     try {
       const created = await runResearchReport({ query: query.trim(), max_iterations: 3 });
       const full = await getResearchReport(created.id);
@@ -29,6 +32,19 @@ export default function ResearchPage() {
       setError(err instanceof Error ? err.message : "Research failed.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async (format: "markdown" | "pdf") => {
+    if (!report?.id) return;
+    setExporting(format);
+    setExportError(null);
+    try {
+      await downloadResearchExport(report.id, format);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Export failed.");
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -61,8 +77,35 @@ export default function ResearchPage() {
         {report && (
           <Card className="border-white/10 bg-card/65">
             <CardHeader>
-              <CardTitle>{report.report?.title || report.query}</CardTitle>
-              <p className="text-xs text-muted-foreground">Status: {report.status}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle>{report.report?.title || report.query}</CardTitle>
+                  <p className="text-xs text-muted-foreground">Status: {report.status}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={exporting !== null}
+                    onClick={() => void handleExport("markdown")}
+                    aria-label="Export MD"
+                  >
+                    {exporting === "markdown" ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4 mr-1" />}
+                    Export MD
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={exporting !== null}
+                    onClick={() => void handleExport("pdf")}
+                    aria-label="Export PDF"
+                  >
+                    {exporting === "pdf" ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4 mr-1" />}
+                    Export PDF
+                  </Button>
+                </div>
+              </div>
+              {exportError && <p className="text-sm text-destructive mt-2">{exportError}</p>}
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               {report.report?.executive_summary && (

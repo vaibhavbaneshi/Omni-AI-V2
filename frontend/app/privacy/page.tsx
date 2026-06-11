@@ -23,7 +23,7 @@ export default function PrivacyPage() {
             <p>Security-sensitive settings and API keys should be handled by authenticated backend services, not only client state.</p>
           </div>
           <Button asChild className="mt-8">
-            <Link href="/register">Create Account</Link>
+            <Link href="/login">Create Account</Link>
           </Button>
         </div>
       </div>

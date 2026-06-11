@@ -25,6 +25,32 @@ services:
       timeout: 3s
       retries: 10
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - backend/.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: omniai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # Autonomous agent scheduling requires Redis + this worker process.
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+    volumes:
+      - ./backend:/app/backend
+      - ./backend/chroma_db:/app/backend/chroma_db
+      - ./backend/uploads:/app/backend/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m app.worker
+
   backend:
     build:
       context: .

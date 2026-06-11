@@ -72,6 +72,7 @@ import {
 } from "@/lib/api";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useModels } from "@/hooks/useModels";
+import { NotificationsBell } from "@/components/notifications/notifications-bell";
 import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 import { getPreferredModelId, setPreferredModelId } from "@/lib/model-preferences";
 import { sanitizeChatError, sanitizeApiError } from "@/lib/user-facing-errors";
@@ -286,6 +287,7 @@ export default function ChatPage() {
   );
 
   const handleNewChat = () => {
+    cancelChatStream();
     setAttachedFile(null);
     setUploadStatus("idle");
     setUploadMessage(null);
@@ -992,6 +994,7 @@ export default function ChatPage() {
                         size="icon"
                         className="size-7 text-muted-foreground/70 hover:text-foreground"
                         onClick={handleNewChat}
+                        aria-label="New chat"
                       >
                         <Plus className="size-4" />
                       </Button>
@@ -1313,6 +1316,7 @@ export default function ChatPage() {
               </TooltipTrigger>
               <TooltipContent>Share</TooltipContent>
             </Tooltip>
+            <NotificationsBell />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-foreground" asChild>

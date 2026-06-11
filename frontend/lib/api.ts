@@ -1599,6 +1599,7 @@ export type AutonomousAgentRecord = {
   agent_type: string;
   status: string;
   schedule_kind: string;
+  config?: Record<string, unknown>;
   next_run_at?: string | null;
   last_run_at?: string | null;
 };
@@ -1676,8 +1677,54 @@ export async function installMarketplaceTemplate(slug: string, token?: string | 
   }, token);
 }
 
+export type NotificationRecord = {
+  id: number;
+  title: string;
+  body?: string | null;
+  category: string;
+  link?: string | null;
+  read: boolean;
+  created_at?: string | null;
+};
+
 export async function listNotifications(token?: string | null) {
-  return apiRequest<{ notifications: Array<Record<string, unknown>> }>("/notifications", {}, token);
+  return apiRequest<{ notifications: NotificationRecord[] }>("/notifications", {}, token);
+}
+
+export async function getNotificationUnreadCount(token?: string | null) {
+  return apiRequest<{ count: number }>("/notifications/unread-count", {}, token);
+}
+
+export async function markNotificationRead(notificationId: number, token?: string | null) {
+  return apiRequest<{ read: boolean }>(`/notifications/${notificationId}/read`, { method: "POST" }, token);
+}
+
+export async function downloadResearchExport(reportId: number, format: "markdown" | "pdf", token?: string | null) {
+  const url = format === "markdown" ? researchExportMarkdownUrl(reportId) : researchExportPdfUrl(reportId);
+  const authToken = resolveAuthToken(token);
+  const headers: Record<string, string> = {};
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const csrf = getCsrfToken();
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    headers,
+  });
+  if (!response.ok) {
+    throw new ApiError("Export failed.", response.status, response.statusText);
+  }
+  const blob = await response.blob();
+  const extension = format === "markdown" ? "md" : "pdf";
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = `research-report-${reportId}.${extension}`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export async function runDeepResearch(body: { query: string; max_iterations?: number }, token?: string | null) {

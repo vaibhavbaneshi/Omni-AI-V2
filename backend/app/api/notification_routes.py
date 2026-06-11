@@ -10,6 +10,7 @@ from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.services.notification_service import (
+    get_unread_count,
     list_notifications,
     mark_all_read,
     mark_notification_read,
@@ -31,6 +32,11 @@ def get_notifications(
 ):
     rows = list_notifications(db, user_id=current_user.id, unread_only=unread_only)
     return {"notifications": [serialize_notification(row) for row in rows]}
+
+
+@router.get("/unread-count")
+def unread_notification_count(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return {"count": get_unread_count(db, user_id=current_user.id)}
 
 
 @router.post("/{notification_id}/read")

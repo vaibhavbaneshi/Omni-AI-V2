@@ -13,9 +13,27 @@ import {
   runAutonomousAgent,
   type AutonomousAgentRecord,
 } from "@/lib/api";
+import { formatFutureRun, formatPastRun } from "@/lib/format-relative-time";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+
+function agentDisplayStatus(agent: AutonomousAgentRecord): "idle" | "running" | "error" | "paused" {
+  if (agent.status === "paused") return "paused";
+  const runtime = (agent.config?.runtime_status as string | undefined) ?? "idle";
+  if (runtime === "error") return "error";
+  if (runtime === "running") return "running";
+  return "idle";
+}
+
+const statusStyles: Record<string, string> = {
+  idle: "border-emerald-300/20 bg-emerald-400/10 text-emerald-200",
+  running: "border-primary/20 bg-primary/10 text-primary",
+  error: "border-destructive/20 bg-destructive/10 text-destructive",
+  paused: "border-amber-300/20 bg-amber-400/10 text-amber-200",
+};
 
 export default function AgentsPage() {
   const { ready, authenticated } = useRequireAuth();
@@ -102,38 +120,50 @@ export default function AgentsPage() {
           <div className="flex justify-center py-12"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>
         ) : (
           <div className="space-y-3">
-            {agents.map((agent) => (
-              <Card key={agent.id} className="border-white/10 bg-card/65">
-                <CardContent className="py-4 flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium">{agent.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {agent.agent_type} · {agent.status} · schedule: {agent.schedule_kind}
-                    </p>
-                    {agent.next_run_at && (
-                      <p className="text-xs text-muted-foreground">Next run: {new Date(agent.next_run_at).toLocaleString()}</p>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" disabled={busyId === agent.id} onClick={() => void withBusy(agent.id, () => runAutonomousAgent(agent.id))}>
-                      {busyId === agent.id ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-                    </Button>
-                    {agent.status === "paused" ? (
-                      <Button size="sm" variant="outline" onClick={() => void withBusy(agent.id, () => resumeAutonomousAgent(agent.id))}>
-                        <Play className="size-4" />
+            {agents.map((agent) => {
+              const displayStatus = busyId === agent.id ? "running" : agentDisplayStatus(agent);
+              return (
+                <Card key={agent.id} className="border-white/10 bg-card/65">
+                  <CardContent className="py-4 flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">{agent.name}</p>
+                        <Badge variant="outline" className={cn("text-[10px] capitalize", statusStyles[displayStatus])}>
+                          {displayStatus}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {agent.agent_type} · schedule: {agent.schedule_kind}
+                      </p>
+                      {agent.next_run_at && (
+                        <p className="text-xs text-muted-foreground">{formatFutureRun(agent.next_run_at)}</p>
+                      )}
+                      <p className="text-xs text-muted-foreground">{formatPastRun(agent.last_run_at)}</p>
+                      {typeof agent.config?.last_error === "string" && displayStatus === "error" && (
+                        <p className="text-xs text-destructive">{agent.config.last_error}</p>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" disabled={busyId === agent.id} onClick={() => void withBusy(agent.id, () => runAutonomousAgent(agent.id))}>
+                        {busyId === agent.id ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
                       </Button>
-                    ) : (
-                      <Button size="sm" variant="outline" onClick={() => void withBusy(agent.id, () => pauseAutonomousAgent(agent.id))}>
-                        <Pause className="size-4" />
+                      {agent.status === "paused" ? (
+                        <Button size="sm" variant="outline" onClick={() => void withBusy(agent.id, () => resumeAutonomousAgent(agent.id))}>
+                          <Play className="size-4" />
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" onClick={() => void withBusy(agent.id, () => pauseAutonomousAgent(agent.id))}>
+                          <Pause className="size-4" />
+                        </Button>
+                      )}
+                      <Button size="sm" variant="destructive" onClick={() => void withBusy(agent.id, () => deleteAutonomousAgent(agent.id))}>
+                        <Trash2 className="size-4" />
                       </Button>
-                    )}
-                    <Button size="sm" variant="destructive" onClick={() => void withBusy(agent.id, () => deleteAutonomousAgent(agent.id))}>
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
             {!agents.length && <p className="text-sm text-muted-foreground">No agents yet. Create one or install from the marketplace.</p>}
           </div>
         )}

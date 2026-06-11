@@ -126,7 +126,7 @@ export default function LandingPage() {
                         <Link href="/login" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
                           Sign in
                         </Link>
-                        <Link href="/register" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
+                        <Link href="/login" className="rounded-lg px-3 py-2 text-sm hover:bg-white/5" onClick={() => setMobileNavOpen(false)}>
                           Get started
                         </Link>
                       </>
@@ -193,7 +193,7 @@ export default function LandingPage() {
                     Sign In
                   </Link>
                   <Button size="sm" className="shadow-[0_0_20px_rgba(var(--primary),0.2)]" asChild>
-                    <Link href="/register">
+                    <Link href="/login">
                       Get Started
                     </Link>
                   </Button>
@@ -256,7 +256,7 @@ export default function LandingPage() {
               className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4"
             >
               <Button size="lg" className="w-full sm:w-auto glow-primary font-semibold text-primary-foreground h-12 px-8" asChild>
-                <Link href={ready && authenticated ? "/dashboard" : "/register"}>
+                <Link href={ready && authenticated ? "/dashboard" : "/login"}>
                   {ready && authenticated ? "Open Dashboard" : "Start Building Free"}
                   <ArrowRight className="ml-2 size-4" />
                 </Link>
@@ -539,7 +539,7 @@ export default function LandingPage() {
                       variant={plan.popular ? "default" : "secondary"}
                       asChild
                     >
-                      <Link href="/register">{plan.cta}</Link>
+                      <Link href="/login">{plan.cta}</Link>
                     </Button>
                   </CardContent>
                 </Card>
@@ -632,7 +632,7 @@ export default function LandingPage() {
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" className="glow-primary font-semibold h-12 px-8 text-primary-foreground w-full sm:w-auto" asChild>
-                <Link href="/register">
+                <Link href="/login">
                   Deploy Intelligence
                   <ArrowRight className="ml-2 size-4" />
                 </Link>

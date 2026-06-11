@@ -52,6 +52,7 @@ import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
 import { formatCount, useAnalytics } from "@/hooks/useAnalytics";
 import { logoutSession } from "@/lib/api";
 import { AgentTracesPanel } from "@/components/dashboard/agent-traces-panel";
+import { NotificationsBell } from "@/components/notifications/notifications-bell";
 import { cn } from "@/lib/utils";
 
 const quickActions = [
@@ -211,6 +212,7 @@ export default function DashboardPage() {
             <Link href="/settings" aria-label="Settings" className={buttonVariants({ variant: "ghost", size: "icon" })}>
               <Settings className="size-4" />
             </Link>
+            <NotificationsBell />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 rounded-full ring-1 ring-white/10 px-1.5 py-1 transition hover:ring-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/50">

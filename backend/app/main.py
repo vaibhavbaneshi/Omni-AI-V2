@@ -118,6 +118,13 @@ async def lifespan(app: FastAPI):
                 daemon=True,
             ).start()
         app.state.ready = True
+        if settings.redis_url:
+            try:
+                from app.jobs.agent_jobs import ensure_agent_poll_scheduled
+
+                ensure_agent_poll_scheduled()
+            except Exception:
+                logger.warning("Autonomous agent poll scheduling skipped at startup", exc_info=True)
         try:
             from app.db.session import SessionLocal
             from app.marketplace.catalog import seed_marketplace_templates
@@ -265,3 +272,9 @@ app.include_router(connector_hub_router)
 app.include_router(marketplace_router)
 app.include_router(research_router)
 app.include_router(notification_router)
+
+if os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "yes"}:
+    from app.api.test_utils_routes import router as test_utils_router
+
+    app.include_router(test_utils_router)
+    logger.info("TEST_MODE enabled — test utility routes registered")
