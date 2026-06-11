@@ -49,6 +49,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { clearSession, getInitials, useRequireAuth } from "@/lib/auth";
+import { useTimeOfDayGreeting } from "@/lib/time-greeting";
 import { formatCount, useAnalytics } from "@/hooks/useAnalytics";
 import { logoutSession } from "@/lib/api";
 import { AgentTracesPanel } from "@/components/dashboard/agent-traces-panel";
@@ -95,6 +96,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const { session, ready, authenticated } = useRequireAuth();
   const { overview, platform, sessions, loading, error } = useAnalytics(session?.token, 30);
+  const timeGreeting = useTimeOfDayGreeting();
 
   const stats = useMemo(() => {
     if (!overview) return [];
@@ -269,7 +271,7 @@ export default function DashboardPage() {
             </div>
             <div className="max-w-3xl space-y-3">
               <h1 className="text-3xl font-semibold leading-tight sm:text-4xl lg:text-5xl">
-                Good evening, {displayName}. Your AI operating layer is synchronized.
+                {timeGreeting}, {displayName}. Your AI operating layer is synchronized.
               </h1>
               <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
                 Monitor model traffic, agent workload, billing capacity, and knowledge flow from one high-signal control surface.
