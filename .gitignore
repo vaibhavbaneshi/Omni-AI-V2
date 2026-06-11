@@ -28,6 +28,7 @@ frontend/e2e/.auth/
 backend/.venv/
 
 frontend/test-results/
+frontend/package-lock.json
 
 backend/.coverage
 
